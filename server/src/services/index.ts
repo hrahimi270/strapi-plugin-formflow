@@ -1,5 +1,5 @@
-import service from './service';
+import form from './form';
 
 export default {
-  service,
+  form,
 };
