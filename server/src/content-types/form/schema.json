@@ -56,6 +56,12 @@
     "submissionCount": {
       "type": "integer",
       "default": 0
+    },
+    "submissions": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "plugin::strapi-forms.form-submission",
+      "mappedBy": "form"
     }
   }
 }
