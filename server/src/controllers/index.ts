@@ -1,5 +1,5 @@
-import controller from './controller';
+import form from './form';
 
 export default {
-  controller,
+  form,
 };
