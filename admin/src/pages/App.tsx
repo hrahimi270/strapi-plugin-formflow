@@ -1,12 +1,26 @@
 import { Page } from '@strapi/strapi/admin';
 import { Routes, Route } from 'react-router-dom';
 
-import { HomePage } from './HomePage';
+// Pages
+import { FormsListPage } from './FormsListPage';
+import { FormEditPage } from './FormEditPage';
+import { SubmissionsListPage } from './SubmissionsListPage';
+import { SubmissionDetailPage } from './SubmissionDetailPage';
 
 const App = () => {
   return (
     <Routes>
-      <Route index element={<HomePage />} />
+      {/* Forms */}
+      <Route index element={<FormsListPage />} />
+      <Route path="forms" element={<FormsListPage />} />
+      <Route path="forms/create" element={<FormEditPage />} />
+      <Route path="forms/:id/edit" element={<FormEditPage />} />
+
+      {/* Submissions */}
+      <Route path="forms/:formId/submissions" element={<SubmissionsListPage />} />
+      <Route path="submissions/:id" element={<SubmissionDetailPage />} />
+
+      {/* Fallback */}
       <Route path="*" element={<Page.Error />} />
     </Routes>
   );
