@@ -15,6 +15,7 @@ import {
 } from '@strapi/design-system';
 import { Cross, Plus, Trash } from '@strapi/icons';
 
+import { ValidationRulesEditor } from './ValidationRulesEditor';
 import type { FormField, FieldOption } from '../../utils/api';
 
 interface FieldEditorProps {
@@ -226,6 +227,13 @@ export const FieldEditor = ({ field, onChange, onClose }: FieldEditorProps) => {
                 <Field.Hint>Pre-filled value when the form loads</Field.Hint>
               </Field.Root>
             )}
+
+            {/* Validation Rules Editor */}
+            <ValidationRulesEditor
+              fieldType={field.type}
+              rules={field.validation || []}
+              onChange={(validation) => onChange({ validation })}
+            />
           </>
         )}
 
