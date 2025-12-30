@@ -16,7 +16,7 @@ export default {
       handler: 'public.getFormSchema',
       config: {
         auth: false,
-        policies: [],
+        policies: ['plugin::strapi-forms.is-form-active'],
       },
     },
     {
@@ -25,7 +25,7 @@ export default {
       handler: 'public.submitForm',
       config: {
         auth: false,
-        policies: [],
+        policies: ['plugin::strapi-forms.is-form-active'],
       },
     },
   ],
