@@ -129,6 +129,11 @@ export interface Form {
 }
 
 /**
+ * Submission status type
+ */
+export type SubmissionStatus = 'new' | 'read' | 'processed' | 'archived' | 'spam';
+
+/**
  * Form submission entity
  */
 export interface FormSubmission {
@@ -136,7 +141,7 @@ export interface FormSubmission {
   documentId: string;
   data: Record<string, unknown>;
   metadata: Record<string, unknown>;
-  status: 'new' | 'read' | 'archived';
+  status: SubmissionStatus;
   ipAddress?: string;
   userAgent?: string;
   createdAt: string;
@@ -191,7 +196,7 @@ export interface FormPayload {
  * Submission update payload
  */
 export interface SubmissionUpdatePayload {
-  status?: 'new' | 'read' | 'archived';
+  status?: SubmissionStatus;
 }
 
 /**
@@ -211,5 +216,5 @@ export interface SubmissionsQueryParams {
   page?: number;
   pageSize?: number;
   sort?: string;
-  status?: 'new' | 'read' | 'archived';
+  status?: SubmissionStatus;
 }
