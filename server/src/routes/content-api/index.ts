@@ -1,14 +1,32 @@
-export default () => ({
+export default {
   type: 'content-api',
   routes: [
     {
       method: 'GET',
       path: '/',
-      // name of the controller file & the method.
-      handler: 'controller.index',
+      handler: 'public.index',
       config: {
+        auth: false,
+        policies: [],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/forms/:slug',
+      handler: 'public.getFormSchema',
+      config: {
+        auth: false,
+        policies: [],
+      },
+    },
+    {
+      method: 'POST',
+      path: '/forms/:slug/submit',
+      handler: 'public.submitForm',
+      config: {
+        auth: false,
         policies: [],
       },
     },
   ],
-});
+};
