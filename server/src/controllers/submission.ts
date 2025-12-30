@@ -265,10 +265,12 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
    *
    * Query params:
    * - status: Filter by status
+   * - includeIp: Include IP address column (true/false)
+   * - format: Export format (csv/json, default: csv)
    */
   async export(ctx: SubmissionContext) {
     const { formId } = ctx.params;
-    const { status } = ctx.query;
+    const { status, includeIp = 'false', format = 'csv' } = ctx.query;
 
     if (!formId) {
       return ctx.badRequest('Form ID is required');
@@ -280,20 +282,37 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         filters.status = status;
       }
 
-      const csv = await strapi
-        .plugin('strapi-forms')
-        .service('submission')
-        .exportToCsv(formId, filters);
+      const exportService = strapi.plugin('strapi-forms').service('export');
+      const formService = strapi.plugin('strapi-forms').service('form');
 
       // Get form for filename
-      const form = await strapi.plugin('strapi-forms').service('form').findOne(formId);
+      const form = await formService.findOne(formId);
+      if (!form) {
+        return ctx.notFound('Form not found');
+      }
 
       const dateStr = new Date().toISOString().split('T')[0];
-      const filename = `${form?.slug || 'submissions'}-${dateStr}.csv`;
+      const baseFilename = `${form.slug || 'submissions'}-${dateStr}`;
 
-      ctx.set('Content-Type', 'text/csv; charset=utf-8');
-      ctx.set('Content-Disposition', `attachment; filename="${filename}"`);
-      ctx.body = csv;
+      if (format === 'json') {
+        const json = await exportService.exportToJSON(formId, {
+          filters,
+          includeIp: includeIp === 'true',
+        });
+
+        ctx.set('Content-Type', 'application/json; charset=utf-8');
+        ctx.set('Content-Disposition', `attachment; filename="${baseFilename}.json"`);
+        ctx.body = json;
+      } else {
+        const csv = await exportService.exportToCSV(formId, {
+          filters,
+          includeIp: includeIp === 'true',
+        });
+
+        ctx.set('Content-Type', 'text/csv; charset=utf-8');
+        ctx.set('Content-Disposition', `attachment; filename="${baseFilename}.csv"`);
+        ctx.body = csv;
+      }
     } catch (error) {
       strapi.log.error('[Strapi Forms] Error exporting submissions:', error);
       ctx.throw(500, 'Failed to export submissions');
