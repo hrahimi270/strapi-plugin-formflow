@@ -67,5 +67,63 @@ export default {
         policies: [],
       },
     },
+
+    // Submission management
+    {
+      method: 'GET',
+      path: '/forms/:formId/submissions',
+      handler: 'submission.find',
+      config: {
+        policies: [],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/forms/:formId/submissions/stats',
+      handler: 'submission.stats',
+      config: {
+        policies: [],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/forms/:formId/submissions/export',
+      handler: 'submission.export',
+      config: {
+        policies: [],
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/forms/:formId/submissions',
+      handler: 'submission.deleteMany',
+      config: {
+        policies: [],
+      },
+    },
+    {
+      method: 'GET',
+      path: '/submissions/:id',
+      handler: 'submission.findOne',
+      config: {
+        policies: [],
+      },
+    },
+    {
+      method: 'PUT',
+      path: '/submissions/:id',
+      handler: 'submission.update',
+      config: {
+        policies: [],
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/submissions/:id',
+      handler: 'submission.delete',
+      config: {
+        policies: [],
+      },
+    },
   ],
 };
