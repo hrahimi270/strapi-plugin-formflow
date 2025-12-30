@@ -25,7 +25,7 @@ export default {
       handler: 'public.submitForm',
       config: {
         auth: false,
-        policies: ['plugin::strapi-forms.is-form-active'],
+        policies: ['plugin::strapi-forms.is-form-active', 'plugin::strapi-forms.rate-limit'],
       },
     },
   ],
