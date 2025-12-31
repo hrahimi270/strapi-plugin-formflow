@@ -396,15 +396,40 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
   ): Promise<void> {
     const settings = form.settings || {};
 
-    // Email notifications (placeholder for Phase 5)
+    // Email notifications
     if (settings.emailNotifications?.length) {
+      const emailService = strapi.plugin('strapi-forms').service('email');
+
+      // Prepare form context for email
+      const formContext = {
+        documentId: form.documentId,
+        title: form.title,
+        slug: form.slug,
+        fields: form.fields?.map((f) => ({
+          name: f.name,
+          label: f.label,
+          type: f.type,
+        })),
+      };
+
+      // Prepare submission context for email
+      const submissionContext = {
+        documentId: submission.documentId,
+        createdAt: submission.createdAt,
+        ipAddress: submission.ipAddress,
+      };
+
+      // Send all configured notifications
       for (const notification of settings.emailNotifications) {
-        if (notification.enabled) {
-          strapi.log.info(
-            `[Strapi Forms] Email notification queued for form "${form.title}" to: ${notification.to.join(', ')}`
-          );
-          // TODO: Implement email sending in Phase 5
-          // await this.sendEmailNotification(notification, form, submission, data);
+        if (notification.enabled && notification.to?.length) {
+          // Run in background to not block response
+          emailService
+            .sendSubmissionNotification(notification, formContext, submissionContext, data)
+            .catch((error: Error) => {
+              strapi.log.error(
+                `[Strapi Forms] Email notification failed for form "${form.title}": ${error.message}`
+              );
+            });
         }
       }
     }
