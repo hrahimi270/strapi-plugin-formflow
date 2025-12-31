@@ -149,6 +149,17 @@ export interface FormSubmission {
 }
 
 /**
+ * Form submission with form relation (returned by detail endpoint)
+ */
+export interface FormSubmissionDetail extends FormSubmission {
+  form?: {
+    documentId: string;
+    title: string;
+    fields: FormField[];
+  };
+}
+
+/**
  * Field type definition for form builder
  */
 export interface FieldType {
