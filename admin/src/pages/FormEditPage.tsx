@@ -22,12 +22,14 @@ import { useForm } from '../hooks';
 import { FormBuilder } from '../components/FormBuilder';
 import { FormSettings } from '../components/FormSettings';
 import { EmailSettings } from '../components/FormSettings/EmailSettings';
+import { WebhookSettings } from '../components/FormSettings/WebhookSettings';
 import { PLUGIN_ID } from '../pluginId';
 import type {
   FormField,
   FormSettings as FormSettingsType,
   FormPayload,
   EmailNotification,
+  WebhookConfig,
 } from '../utils/api';
 
 /**
@@ -367,20 +369,39 @@ export const FormEditPage = () => {
 
             {/* Notifications Tab */}
             <Tabs.Content value="notifications">
-              <Box
-                padding={6}
-                background="neutral0"
-                hasRadius
-                shadow="tableShadow"
-                borderColor="neutral150"
-              >
-                <EmailSettings
-                  notifications={formData.settings.emailNotifications || []}
-                  onChange={(emailNotifications: EmailNotification[]) =>
-                    updateField('settings', { ...formData.settings, emailNotifications })
-                  }
-                />
-              </Box>
+              <Flex direction="column" gap={6}>
+                {/* Email Notifications */}
+                <Box
+                  padding={6}
+                  background="neutral0"
+                  hasRadius
+                  shadow="tableShadow"
+                  borderColor="neutral150"
+                >
+                  <EmailSettings
+                    notifications={formData.settings.emailNotifications || []}
+                    onChange={(emailNotifications: EmailNotification[]) =>
+                      updateField('settings', { ...formData.settings, emailNotifications })
+                    }
+                  />
+                </Box>
+
+                {/* Webhooks */}
+                <Box
+                  padding={6}
+                  background="neutral0"
+                  hasRadius
+                  shadow="tableShadow"
+                  borderColor="neutral150"
+                >
+                  <WebhookSettings
+                    webhooks={formData.settings.webhooks || []}
+                    onChange={(webhooks: WebhookConfig[]) =>
+                      updateField('settings', { ...formData.settings, webhooks })
+                    }
+                  />
+                </Box>
+              </Flex>
             </Tabs.Content>
           </Box>
         </Tabs.Root>

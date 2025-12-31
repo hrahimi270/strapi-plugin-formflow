@@ -80,6 +80,11 @@ export interface EmailNotification {
 }
 
 /**
+ * Webhook event types
+ */
+export type WebhookEvent = 'submission.created' | 'submission.updated' | 'submission.deleted';
+
+/**
  * Webhook configuration
  */
 export interface WebhookConfig {
@@ -87,7 +92,10 @@ export interface WebhookConfig {
   url: string;
   method: 'POST' | 'PUT';
   headers?: Record<string, string>;
-  events: Array<'submission.created' | 'submission.updated'>;
+  events: WebhookEvent[];
+  includeFormData?: boolean;
+  secret?: string;
+  timeout?: number;
 }
 
 /**
