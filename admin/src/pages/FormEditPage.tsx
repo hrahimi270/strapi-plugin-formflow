@@ -21,8 +21,14 @@ import { Page, useNotification } from '@strapi/strapi/admin';
 import { useForm } from '../hooks';
 import { FormBuilder } from '../components/FormBuilder';
 import { FormSettings } from '../components/FormSettings';
+import { EmailSettings } from '../components/FormSettings/EmailSettings';
 import { PLUGIN_ID } from '../pluginId';
-import type { FormField, FormSettings as FormSettingsType, FormPayload } from '../utils/api';
+import type {
+  FormField,
+  FormSettings as FormSettingsType,
+  FormPayload,
+  EmailNotification,
+} from '../utils/api';
 
 /**
  * Default form settings used when creating a new form
@@ -368,16 +374,12 @@ export const FormEditPage = () => {
                 shadow="tableShadow"
                 borderColor="neutral150"
               >
-                <Flex direction="column" alignItems="center" gap={4} padding={8}>
-                  <Typography variant="delta" fontWeight="bold">
-                    Email & Webhook Notifications
-                  </Typography>
-                  <Typography textColor="neutral600" textAlign="center">
-                    Configure email notifications and webhook integrations for form submissions.
-                    <br />
-                    This feature will be available in a future update.
-                  </Typography>
-                </Flex>
+                <EmailSettings
+                  notifications={formData.settings.emailNotifications || []}
+                  onChange={(emailNotifications: EmailNotification[]) =>
+                    updateField('settings', { ...formData.settings, emailNotifications })
+                  }
+                />
               </Box>
             </Tabs.Content>
           </Box>

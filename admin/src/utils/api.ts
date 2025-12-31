@@ -71,9 +71,12 @@ export interface FormField {
 export interface EmailNotification {
   enabled: boolean;
   to: string[];
+  cc?: string[];
+  bcc?: string[];
   subject: string;
-  template?: string;
   replyTo?: string;
+  includeData?: boolean;
+  template?: string;
 }
 
 /**
