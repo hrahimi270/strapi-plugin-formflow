@@ -434,15 +434,39 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       }
     }
 
-    // Webhooks (placeholder for Phase 5)
+    // Webhooks
     if (settings.webhooks?.length) {
-      for (const webhook of settings.webhooks) {
-        if (webhook.enabled && webhook.events?.includes('submission.created')) {
-          strapi.log.info(`[Strapi Forms] Webhook queued for form "${form.title}": ${webhook.url}`);
-          // TODO: Implement webhook triggering in Phase 5
-          // await this.triggerWebhook(webhook, form, submission, data);
-        }
-      }
+      const webhookService = strapi.plugin('strapi-forms').service('webhook');
+
+      // Prepare form context for webhook
+      const webhookFormContext = {
+        documentId: form.documentId,
+        title: form.title,
+        slug: form.slug,
+      };
+
+      // Prepare submission context for webhook
+      const webhookSubmissionContext = {
+        documentId: submission.documentId,
+        status: submission.status,
+        createdAt: submission.createdAt,
+        updatedAt: submission.updatedAt,
+      };
+
+      // Trigger all webhooks in background to not block response
+      webhookService
+        .triggerAll(
+          settings.webhooks,
+          'submission.created',
+          webhookFormContext,
+          webhookSubmissionContext,
+          data
+        )
+        .catch((error: Error) => {
+          strapi.log.error(
+            `[Strapi Forms] Webhook trigger failed for form "${form.title}": ${error.message}`
+          );
+        });
     }
   },
 
