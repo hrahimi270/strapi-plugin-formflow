@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Modal, Box, Flex, Grid, Typography } from '@strapi/design-system';
+import { Modal, Box, Flex, Grid, Typography, Button } from '@strapi/design-system';
 import {
   Pencil,
   Mail,
@@ -185,22 +185,7 @@ export const FieldTypeSelector = ({
         </Modal.Body>
         <Modal.Footer>
           <Modal.Close>
-            <Box
-              as="button"
-              type="button"
-              paddingLeft={4}
-              paddingRight={4}
-              paddingTop={2}
-              paddingBottom={2}
-              background="neutral100"
-              borderColor="neutral200"
-              borderStyle="solid"
-              borderWidth="1px"
-              hasRadius
-              cursor="pointer"
-            >
-              <Typography fontWeight="bold">Cancel</Typography>
-            </Box>
+            <Button variant="tertiary">Cancel</Button>
           </Modal.Close>
         </Modal.Footer>
       </Modal.Content>
