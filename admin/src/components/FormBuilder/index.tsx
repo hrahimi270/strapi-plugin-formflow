@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Box, Flex, Grid, Typography, Button, IconButton } from '@strapi/design-system';
+import { Box, Flex, Typography, Button, IconButton } from '@strapi/design-system';
 import { Plus, Trash, Pencil, Drag } from '@strapi/icons';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -72,13 +72,14 @@ const getDefaultLabel = (type: string): string => {
 
 /**
  * FormBuilder component - Core form building interface
- * Provides two-panel layout with field list and editor
+ * Displays fields in a grid layout respecting their width settings
  * Supports drag-and-drop reordering, add, edit, and delete operations
  */
 export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
   const { fieldTypes, isLoading: isLoadingFieldTypes } = useFieldTypes();
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   // Get sorted fields by order
@@ -101,19 +102,21 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
     setIsSelectorOpen(false);
   }, []);
 
-  // Handle field type selection - add new field and select it
+  // Handle field type selection - add new field and open editor
   const handleFieldTypeSelect = useCallback(
     (type: string) => {
       const newField = createNewField(type, fields.length);
       onChange([...fields, newField]);
       setSelectedFieldId(newField.id);
+      setIsEditorOpen(true);
     },
     [fields, onChange]
   );
 
-  // Handle field selection
-  const handleFieldSelect = useCallback((fieldId: string) => {
+  // Handle field selection for editing
+  const handleFieldEdit = useCallback((fieldId: string) => {
     setSelectedFieldId(fieldId);
+    setIsEditorOpen(true);
   }, []);
 
   // Handle field update
@@ -131,13 +134,15 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
       onChange(fields.filter((f) => f.id !== fieldId).map((f, index) => ({ ...f, order: index })));
       if (selectedFieldId === fieldId) {
         setSelectedFieldId(null);
+        setIsEditorOpen(false);
       }
     },
     [fields, onChange, selectedFieldId]
   );
 
-  // Handle closing the field editor
+  // Handle closing the field editor modal
   const handleEditorClose = useCallback(() => {
+    setIsEditorOpen(false);
     setSelectedFieldId(null);
   }, []);
 
@@ -145,7 +150,6 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
   const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>, index: number) => {
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
-    // Set drag image transparency
     if (e.currentTarget) {
       e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
     }
@@ -161,7 +165,6 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
         const [movedField] = newFields.splice(draggedIndex, 1);
         newFields.splice(index, 0, movedField);
 
-        // Update order property for all fields
         const reorderedFields = newFields.map((f, i) => ({ ...f, order: i }));
         onChange(reorderedFields);
         setDraggedIndex(index);
@@ -176,128 +179,144 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
 
   return (
     <>
-      <Grid.Root gap={6} gridCols={12}>
-        {/* Field List - Left Panel */}
-        <Grid.Item col={7}>
-          <Box background="neutral0" padding={4} hasRadius shadow="tableShadow">
-            <Flex justifyContent="space-between" alignItems="center" marginBottom={4}>
-              <Typography variant="delta" fontWeight="bold">
-                Form Fields
+      <Box
+        background="neutral0"
+        hasRadius
+        shadow="tableShadow"
+        borderColor="neutral150"
+        padding={5}
+      >
+        {/* Header */}
+        <Flex justifyContent="space-between" alignItems="center" marginBottom={4}>
+          <Typography variant="delta" fontWeight="bold">
+            Form Fields
+          </Typography>
+          <Button size="S" startIcon={<Plus />} onClick={handleAddFieldClick}>
+            Add Field
+          </Button>
+        </Flex>
+
+        {/* Fields Grid */}
+        {sortedFields.length === 0 ? (
+          <Box padding={8} textAlign="center" background="neutral100" hasRadius>
+            <Flex direction="column" gap={2} alignItems="center">
+              <Typography textColor="neutral600" fontWeight="bold">
+                No fields yet
               </Typography>
-              <Button size="S" startIcon={<Plus />} onClick={handleAddFieldClick}>
-                Add Field
-              </Button>
+              <Typography textColor="neutral500" variant="pi">
+                Click "Add Field" to start building your form.
+              </Typography>
+            </Flex>
+          </Box>
+        ) : (
+          <>
+            <Flex wrap="wrap" gap={3}>
+              {sortedFields.map((field, index) => (
+                <Box
+                  key={field.id}
+                  draggable
+                  onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(e, index)}
+                  onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDragOver(e, index)}
+                  onDragEnd={handleDragEnd}
+                  padding={4}
+                  background="neutral100"
+                  borderColor="neutral200"
+                  borderStyle="solid"
+                  borderWidth="1px"
+                  hasRadius
+                  style={{
+                    width: field.width === 'half' ? 'calc(50% - 6px)' : '100%',
+                    opacity: draggedIndex === index ? 0.5 : 1,
+                    transition: 'opacity 0.15s ease-in-out',
+                    cursor: 'grab',
+                  }}
+                >
+                  <Flex justifyContent="space-between" alignItems="flex-start">
+                    <Flex gap={3} alignItems="flex-start" style={{ flex: 1, minWidth: 0 }}>
+                      <Box color="neutral500" style={{ cursor: 'grab', marginTop: '2px' }}>
+                        <Drag />
+                      </Box>
+                      <Box style={{ flex: 1, minWidth: 0 }}>
+                        <Typography fontWeight="bold" ellipsis>
+                          {field.label}
+                        </Typography>
+                        <Flex gap={2} marginTop={1} wrap="wrap">
+                          <Box
+                            padding={1}
+                            paddingLeft={2}
+                            paddingRight={2}
+                            background="primary100"
+                            hasRadius
+                          >
+                            <Typography variant="pi" textColor="primary700">
+                              {field.type}
+                            </Typography>
+                          </Box>
+                          {field.required && (
+                            <Box
+                              padding={1}
+                              paddingLeft={2}
+                              paddingRight={2}
+                              background="danger100"
+                              hasRadius
+                            >
+                              <Typography variant="pi" textColor="danger700">
+                                required
+                              </Typography>
+                            </Box>
+                          )}
+                          <Box
+                            padding={1}
+                            paddingLeft={2}
+                            paddingRight={2}
+                            background="neutral200"
+                            hasRadius
+                          >
+                            <Typography variant="pi" textColor="neutral700">
+                              {field.width === 'half' ? '50%' : '100%'}
+                            </Typography>
+                          </Box>
+                        </Flex>
+                      </Box>
+                    </Flex>
+                    <Flex gap={1} style={{ flexShrink: 0 }}>
+                      <IconButton
+                        label="Edit field"
+                        variant="ghost"
+                        withTooltip={false}
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          handleFieldEdit(field.id);
+                        }}
+                      >
+                        <Pencil />
+                      </IconButton>
+                      <IconButton
+                        label="Delete field"
+                        variant="ghost"
+                        withTooltip={false}
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          handleFieldDelete(field.id);
+                        }}
+                      >
+                        <Trash />
+                      </IconButton>
+                    </Flex>
+                  </Flex>
+                </Box>
+              ))}
             </Flex>
 
-            {sortedFields.length === 0 ? (
-              <Box padding={8} textAlign="center" background="neutral100" hasRadius>
-                <Typography textColor="neutral600">
-                  No fields yet. Click "Add Field" to start building your form.
-                </Typography>
-              </Box>
-            ) : (
-              <Flex direction="column" gap={2}>
-                {sortedFields.map((field, index) => (
-                  <Box
-                    key={field.id}
-                    draggable
-                    onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(e, index)}
-                    onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDragOver(e, index)}
-                    onDragEnd={handleDragEnd}
-                    padding={3}
-                    background={selectedFieldId === field.id ? 'primary100' : 'neutral100'}
-                    borderColor={selectedFieldId === field.id ? 'primary600' : 'neutral200'}
-                    borderStyle="solid"
-                    borderWidth="2px"
-                    hasRadius
-                    cursor="grab"
-                    onClick={() => handleFieldSelect(field.id)}
-                    style={{
-                      opacity: draggedIndex === index ? 0.5 : 1,
-                      transition: 'all 0.15s ease-in-out',
-                    }}
-                  >
-                    <Flex justifyContent="space-between" alignItems="center">
-                      <Flex gap={3} alignItems="center">
-                        <Box color="neutral500" cursor="grab">
-                          <Drag />
-                        </Box>
-                        <Box>
-                          <Typography fontWeight="bold">{field.label}</Typography>
-                          <Typography variant="pi" textColor="neutral600">
-                            {field.type}
-                            {field.required && ' • required'}
-                            {field.width === 'half' && ' • half width'}
-                          </Typography>
-                        </Box>
-                      </Flex>
-                      <Flex gap={1}>
-                        <IconButton
-                          label="Edit field"
-                          variant="ghost"
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            handleFieldSelect(field.id);
-                          }}
-                        >
-                          <Pencil />
-                        </IconButton>
-                        <IconButton
-                          label="Delete field"
-                          variant="ghost"
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            handleFieldDelete(field.id);
-                          }}
-                        >
-                          <Trash />
-                        </IconButton>
-                      </Flex>
-                    </Flex>
-                  </Box>
-                ))}
-
-                {/* Field count */}
-                <Box marginTop={2} textAlign="center">
-                  <Typography textColor="neutral600" variant="pi">
-                    {sortedFields.length} field{sortedFields.length !== 1 ? 's' : ''} configured
-                  </Typography>
-                </Box>
-              </Flex>
-            )}
-          </Box>
-        </Grid.Item>
-
-        {/* Field Editor - Right Panel */}
-        <Grid.Item col={5}>
-          <Box
-            background="neutral0"
-            padding={4}
-            hasRadius
-            shadow="tableShadow"
-            style={{ position: 'sticky', top: 20 }}
-          >
-            {selectedField ? (
-              <FieldEditor
-                field={selectedField}
-                onChange={handleFieldUpdate}
-                onClose={handleEditorClose}
-              />
-            ) : (
-              <Box padding={8} textAlign="center">
-                <Flex direction="column" gap={2} alignItems="center">
-                  <Typography textColor="neutral600" fontWeight="bold">
-                    No field selected
-                  </Typography>
-                  <Typography textColor="neutral500" variant="pi">
-                    Click on a field to edit its properties, or add a new field to get started.
-                  </Typography>
-                </Flex>
-              </Box>
-            )}
-          </Box>
-        </Grid.Item>
-      </Grid.Root>
+            {/* Field count */}
+            <Box marginTop={4} textAlign="center">
+              <Typography textColor="neutral600" variant="pi">
+                {sortedFields.length} field{sortedFields.length !== 1 ? 's' : ''} configured
+              </Typography>
+            </Box>
+          </>
+        )}
+      </Box>
 
       {/* Field Type Selector Modal */}
       <FieldTypeSelector
@@ -306,6 +325,14 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
         onSelect={handleFieldTypeSelect}
         fieldTypes={fieldTypes}
         isLoading={isLoadingFieldTypes}
+      />
+
+      {/* Field Editor Modal */}
+      <FieldEditor
+        field={selectedField}
+        isOpen={isEditorOpen}
+        onChange={handleFieldUpdate}
+        onClose={handleEditorClose}
       />
     </>
   );

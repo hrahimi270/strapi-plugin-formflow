@@ -7,19 +7,21 @@ import {
   Field,
   TextInput,
   Textarea,
-  Toggle,
+  Checkbox,
   IconButton,
   Divider,
   SingleSelect,
   SingleSelectOption,
+  Modal,
 } from '@strapi/design-system';
-import { Cross, Plus, Trash } from '@strapi/icons';
+import { Plus, Trash } from '@strapi/icons';
 
 import { ValidationRulesEditor } from './ValidationRulesEditor';
 import type { FormField, FieldOption } from '../../utils/api';
 
-interface FieldEditorProps {
-  field: FormField;
+export interface FieldEditorProps {
+  field: FormField | null;
+  isOpen: boolean;
   onChange: (updates: Partial<FormField>) => void;
   onClose: () => void;
 }
@@ -51,22 +53,29 @@ const generateFieldName = (label: string): string => {
 };
 
 /**
- * FieldEditor component for editing individual field properties
+ * FieldEditor modal component for editing individual field properties
  * Provides comprehensive form inputs for configuring all field properties
  * including label, name, options (for choice fields), and validation
  */
-export const FieldEditor = ({ field, onChange, onClose }: FieldEditorProps) => {
+export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorProps) => {
   // Determine field type characteristics
-  const hasOptions = useMemo(() => CHOICE_FIELD_TYPES.includes(field.type), [field.type]);
-  const isLayoutField = useMemo(() => LAYOUT_FIELD_TYPES.includes(field.type), [field.type]);
+  const hasOptions = useMemo(
+    () => field && CHOICE_FIELD_TYPES.includes(field.type),
+    [field]
+  );
+  const isLayoutField = useMemo(
+    () => field && LAYOUT_FIELD_TYPES.includes(field.type),
+    [field]
+  );
   const hasDefaultValue = useMemo(
-    () => DEFAULT_VALUE_FIELD_TYPES.includes(field.type),
-    [field.type]
+    () => field && DEFAULT_VALUE_FIELD_TYPES.includes(field.type),
+    [field]
   );
 
   // Handle label change with auto-name generation
   const handleLabelChange = useCallback(
     (label: string) => {
+      if (!field) return;
       const updates: Partial<FormField> = { label };
 
       // Auto-generate name if it looks auto-generated (starts with field_)
@@ -77,7 +86,7 @@ export const FieldEditor = ({ field, onChange, onClose }: FieldEditorProps) => {
 
       onChange(updates);
     },
-    [field.name, onChange]
+    [field, onChange]
   );
 
   // Handle name change with sanitization
@@ -95,257 +104,289 @@ export const FieldEditor = ({ field, onChange, onClose }: FieldEditorProps) => {
 
   // Options management
   const handleAddOption = useCallback(() => {
+    if (!field) return;
     const options = field.options || [];
     const newOption: FieldOption = {
       label: `Option ${options.length + 1}`,
       value: `option_${options.length + 1}`,
     };
     onChange({ options: [...options, newOption] });
-  }, [field.options, onChange]);
+  }, [field, onChange]);
 
   const handleUpdateOption = useCallback(
     (index: number, key: keyof FieldOption, value: string) => {
+      if (!field) return;
       const options = [...(field.options || [])];
       options[index] = { ...options[index], [key]: value };
       onChange({ options });
     },
-    [field.options, onChange]
+    [field, onChange]
   );
 
   const handleRemoveOption = useCallback(
     (index: number) => {
+      if (!field) return;
       const options = [...(field.options || [])];
       options.splice(index, 1);
       onChange({ options });
     },
-    [field.options, onChange]
+    [field, onChange]
   );
 
+  // Handle modal open state change
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      onClose();
+    }
+  };
+
+  if (!field) return null;
+
   return (
-    <Box>
-      {/* Header */}
-      <Flex justifyContent="space-between" alignItems="center" marginBottom={4}>
-        <Typography variant="delta" fontWeight="bold">
-          Edit Field
-        </Typography>
-        <IconButton label="Close editor" onClick={onClose} variant="ghost">
-          <Cross />
-        </IconButton>
-      </Flex>
-
-      {/* Field Type Badge */}
-      <Box marginBottom={4} padding={2} background="primary100" hasRadius display="inline-block">
-        <Typography variant="pi" fontWeight="bold" textColor="primary700">
-          {field.type.toUpperCase()}
-        </Typography>
-      </Box>
-
-      {/* Basic Properties */}
-      <Flex direction="column" gap={4}>
-        {/* Label */}
-        <Field.Root name="label" required>
-          <Field.Label>Label</Field.Label>
-          <TextInput
-            value={field.label}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleLabelChange(e.target.value)}
-            placeholder="Enter field label"
-          />
-          <Field.Hint>The label shown above the field</Field.Hint>
-        </Field.Root>
-
-        {/* Name (field key) */}
-        <Field.Root name="name" required>
-          <Field.Label>Field Name</Field.Label>
-          <TextInput
-            value={field.name}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleNameChange(e.target.value)}
-            placeholder="field_name"
-          />
-          <Field.Hint>Used as the key in form submissions (lowercase, no spaces)</Field.Hint>
-        </Field.Root>
-
-        {/* Only show input-specific options for non-layout fields */}
-        {!isLayoutField && (
-          <>
-            {/* Placeholder */}
-            <Field.Root name="placeholder">
-              <Field.Label>Placeholder</Field.Label>
-              <TextInput
-                value={field.placeholder || ''}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  onChange({ placeholder: e.target.value })
-                }
-                placeholder="Enter placeholder text"
-              />
-              <Field.Hint>Text shown when the field is empty</Field.Hint>
-            </Field.Root>
-
-            {/* Description / Help text */}
-            <Field.Root name="description">
-              <Field.Label>Help Text</Field.Label>
-              <Textarea
-                value={field.description || ''}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  onChange({ description: e.target.value })
-                }
-                placeholder="Additional help text shown below the field"
-              />
-            </Field.Root>
-
-            {/* Required Toggle */}
-            <Flex gap={2} alignItems="center">
-              <Toggle
-                checked={field.required}
-                onCheckedChange={(checked: boolean) => onChange({ required: checked })}
-              />
-              <Typography>Required field</Typography>
+    <Modal.Root open={isOpen} onOpenChange={handleOpenChange}>
+      <Modal.Content>
+        <Modal.Header>
+          <Modal.Title>
+            <Flex gap={3} alignItems="center">
+              <span>Edit Field</span>
+              <Box padding={1} paddingLeft={2} paddingRight={2} background="primary100" hasRadius>
+                <Typography variant="pi" fontWeight="bold" textColor="primary700">
+                  {field.type.toUpperCase()}
+                </Typography>
+              </Box>
             </Flex>
+          </Modal.Title>
+        </Modal.Header>
 
-            {/* Width Selection */}
-            <Field.Root name="width">
-              <Field.Label>Field Width</Field.Label>
-              <SingleSelect
-                value={field.width || 'full'}
-                onChange={(value: string | number) => onChange({ width: value as 'full' | 'half' })}
-              >
-                <SingleSelectOption value="full">Full Width</SingleSelectOption>
-                <SingleSelectOption value="half">Half Width</SingleSelectOption>
-              </SingleSelect>
+        <Modal.Body>
+          <Flex direction="column" gap={4}>
+            {/* Label */}
+            <Field.Root name="label" required>
+              <Field.Label>Label</Field.Label>
+              <TextInput
+                value={field.label}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleLabelChange(e.target.value)
+                }
+                placeholder="Enter field label"
+              />
+              <Field.Hint>The label shown above the field</Field.Hint>
             </Field.Root>
 
-            {/* Default Value for supported field types */}
-            {hasDefaultValue && (
-              <Field.Root name="defaultValue">
-                <Field.Label>Default Value</Field.Label>
-                <TextInput
-                  value={(field.defaultValue as string) || ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    onChange({ defaultValue: e.target.value })
-                  }
-                  placeholder="Default value"
+            {/* Name (field key) */}
+            <Field.Root name="name" required>
+              <Field.Label>Field Name</Field.Label>
+              <TextInput
+                value={field.name}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  handleNameChange(e.target.value)
+                }
+                placeholder="field_name"
+              />
+              <Field.Hint>Used as the key in form submissions (lowercase, no spaces)</Field.Hint>
+            </Field.Root>
+
+            {/* Only show input-specific options for non-layout fields */}
+            {!isLayoutField && (
+              <>
+                {/* Placeholder */}
+                <Field.Root name="placeholder">
+                  <Field.Label>Placeholder</Field.Label>
+                  <TextInput
+                    value={field.placeholder || ''}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      onChange({ placeholder: e.target.value })
+                    }
+                    placeholder="Enter placeholder text"
+                  />
+                  <Field.Hint>Text shown when the field is empty</Field.Hint>
+                </Field.Root>
+
+                {/* Description / Help text */}
+                <Field.Root name="description">
+                  <Field.Label>Help Text</Field.Label>
+                  <Textarea
+                    value={field.description || ''}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                      onChange({ description: e.target.value })
+                    }
+                    placeholder="Additional help text shown below the field"
+                  />
+                </Field.Root>
+
+                {/* Required and Width in same row */}
+                <Flex gap={6} alignItems="flex-start">
+                  <Box style={{ flex: 1 }}>
+                    <Field.Root name="width">
+                      <Field.Label>Field Width</Field.Label>
+                      <SingleSelect
+                        value={field.width || 'full'}
+                        onChange={(value: string | number) =>
+                          onChange({ width: value as 'full' | 'half' })
+                        }
+                      >
+                        <SingleSelectOption value="full">Full Width (100%)</SingleSelectOption>
+                        <SingleSelectOption value="half">Half Width (50%)</SingleSelectOption>
+                      </SingleSelect>
+                    </Field.Root>
+                  </Box>
+                  <Box style={{ flex: 1, paddingTop: '24px' }}>
+                    <Checkbox
+                      checked={field.required}
+                      onCheckedChange={(checked: boolean) => onChange({ required: checked })}
+                    >
+                      Required field
+                    </Checkbox>
+                  </Box>
+                </Flex>
+
+                {/* Default Value for supported field types */}
+                {hasDefaultValue && (
+                  <Field.Root name="defaultValue">
+                    <Field.Label>Default Value</Field.Label>
+                    <TextInput
+                      value={(field.defaultValue as string) || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        onChange({ defaultValue: e.target.value })
+                      }
+                      placeholder="Default value"
+                    />
+                    <Field.Hint>Pre-filled value when the form loads</Field.Hint>
+                  </Field.Root>
+                )}
+
+                {/* Validation Rules Editor */}
+                <ValidationRulesEditor
+                  fieldType={field.type}
+                  rules={field.validation || []}
+                  onChange={(validation) => onChange({ validation })}
                 />
-                <Field.Hint>Pre-filled value when the form loads</Field.Hint>
+              </>
+            )}
+
+            {/* Options Editor for choice fields */}
+            {hasOptions && (
+              <>
+                <Divider />
+                <Box>
+                  <Flex justifyContent="space-between" alignItems="center" marginBottom={3}>
+                    <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
+                      Options
+                    </Typography>
+                    <Button
+                      size="S"
+                      variant="secondary"
+                      startIcon={<Plus />}
+                      onClick={handleAddOption}
+                    >
+                      Add Option
+                    </Button>
+                  </Flex>
+
+                  {(field.options?.length || 0) === 0 ? (
+                    <Box padding={4} background="neutral100" hasRadius textAlign="center">
+                      <Typography textColor="neutral600" variant="pi">
+                        No options yet. Add at least one option.
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Flex direction="column" gap={2}>
+                      {/* Column Headers */}
+                      <Flex gap={2} paddingBottom={1}>
+                        <Box flex="1">
+                          <Typography variant="pi" fontWeight="bold" textColor="neutral600">
+                            Label
+                          </Typography>
+                        </Box>
+                        <Box flex="1">
+                          <Typography variant="pi" fontWeight="bold" textColor="neutral600">
+                            Value
+                          </Typography>
+                        </Box>
+                        <Box width="32px" />
+                      </Flex>
+
+                      {/* Option Rows */}
+                      {(field.options || []).map((option, index) => (
+                        <Flex key={index} gap={2} alignItems="center">
+                          <Box flex="1">
+                            <TextInput
+                              aria-label={`Option ${index + 1} label`}
+                              value={option.label}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                handleUpdateOption(index, 'label', e.target.value)
+                              }
+                              placeholder="Label"
+                              size="S"
+                            />
+                          </Box>
+                          <Box flex="1">
+                            <TextInput
+                              aria-label={`Option ${index + 1} value`}
+                              value={option.value}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                handleUpdateOption(index, 'value', e.target.value)
+                              }
+                              placeholder="value"
+                              size="S"
+                            />
+                          </Box>
+                          <IconButton
+                            label="Remove option"
+                            onClick={() => handleRemoveOption(index)}
+                            disabled={(field.options?.length || 0) <= 1}
+                            variant="ghost"
+                            withTooltip={false}
+                          >
+                            <Trash />
+                          </IconButton>
+                        </Flex>
+                      ))}
+                    </Flex>
+                  )}
+                </Box>
+              </>
+            )}
+
+            {/* Layout field specific options */}
+            {isLayoutField && field.type === 'heading' && (
+              <Field.Root name="headingLevel">
+                <Field.Label>Heading Level</Field.Label>
+                <SingleSelect
+                  value={(field.attributes?.level as string) || 'h2'}
+                  onChange={(value: string | number) =>
+                    onChange({ attributes: { ...field.attributes, level: value } })
+                  }
+                >
+                  <SingleSelectOption value="h1">Heading 1 (H1)</SingleSelectOption>
+                  <SingleSelectOption value="h2">Heading 2 (H2)</SingleSelectOption>
+                  <SingleSelectOption value="h3">Heading 3 (H3)</SingleSelectOption>
+                  <SingleSelectOption value="h4">Heading 4 (H4)</SingleSelectOption>
+                </SingleSelect>
               </Field.Root>
             )}
 
-            {/* Validation Rules Editor */}
-            <ValidationRulesEditor
-              fieldType={field.type}
-              rules={field.validation || []}
-              onChange={(validation) => onChange({ validation })}
-            />
-          </>
-        )}
+            {isLayoutField && field.type === 'paragraph' && (
+              <Field.Root name="content">
+                <Field.Label>Content</Field.Label>
+                <Textarea
+                  value={(field.attributes?.content as string) || ''}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    onChange({ attributes: { ...field.attributes, content: e.target.value } })
+                  }
+                  placeholder="Enter paragraph text"
+                />
+              </Field.Root>
+            )}
+          </Flex>
+        </Modal.Body>
 
-        {/* Options Editor for choice fields */}
-        {hasOptions && (
-          <>
-            <Divider />
-            <Box>
-              <Flex justifyContent="space-between" alignItems="center" marginBottom={3}>
-                <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
-                  Options
-                </Typography>
-                <Button size="S" variant="secondary" startIcon={<Plus />} onClick={handleAddOption}>
-                  Add Option
-                </Button>
-              </Flex>
-
-              {(field.options?.length || 0) === 0 ? (
-                <Box padding={4} background="neutral100" hasRadius textAlign="center">
-                  <Typography textColor="neutral600" variant="pi">
-                    No options yet. Add at least one option.
-                  </Typography>
-                </Box>
-              ) : (
-                <Flex direction="column" gap={2}>
-                  {/* Column Headers */}
-                  <Flex gap={2} paddingBottom={1}>
-                    <Box flex="1">
-                      <Typography variant="pi" fontWeight="bold" textColor="neutral600">
-                        Label
-                      </Typography>
-                    </Box>
-                    <Box flex="1">
-                      <Typography variant="pi" fontWeight="bold" textColor="neutral600">
-                        Value
-                      </Typography>
-                    </Box>
-                    <Box width="32px" />
-                  </Flex>
-
-                  {/* Option Rows */}
-                  {(field.options || []).map((option, index) => (
-                    <Flex key={index} gap={2} alignItems="center">
-                      <Box flex="1">
-                        <TextInput
-                          aria-label={`Option ${index + 1} label`}
-                          value={option.label}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            handleUpdateOption(index, 'label', e.target.value)
-                          }
-                          placeholder="Label"
-                          size="S"
-                        />
-                      </Box>
-                      <Box flex="1">
-                        <TextInput
-                          aria-label={`Option ${index + 1} value`}
-                          value={option.value}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            handleUpdateOption(index, 'value', e.target.value)
-                          }
-                          placeholder="value"
-                          size="S"
-                        />
-                      </Box>
-                      <IconButton
-                        label="Remove option"
-                        onClick={() => handleRemoveOption(index)}
-                        disabled={(field.options?.length || 0) <= 1}
-                        variant="ghost"
-                      >
-                        <Trash />
-                      </IconButton>
-                    </Flex>
-                  ))}
-                </Flex>
-              )}
-            </Box>
-          </>
-        )}
-
-        {/* Layout field specific options */}
-        {isLayoutField && field.type === 'heading' && (
-          <Field.Root name="headingLevel">
-            <Field.Label>Heading Level</Field.Label>
-            <SingleSelect
-              value={(field.attributes?.level as string) || 'h2'}
-              onChange={(value: string | number) =>
-                onChange({ attributes: { ...field.attributes, level: value } })
-              }
-            >
-              <SingleSelectOption value="h1">Heading 1 (H1)</SingleSelectOption>
-              <SingleSelectOption value="h2">Heading 2 (H2)</SingleSelectOption>
-              <SingleSelectOption value="h3">Heading 3 (H3)</SingleSelectOption>
-              <SingleSelectOption value="h4">Heading 4 (H4)</SingleSelectOption>
-            </SingleSelect>
-          </Field.Root>
-        )}
-
-        {isLayoutField && field.type === 'paragraph' && (
-          <Field.Root name="content">
-            <Field.Label>Content</Field.Label>
-            <Textarea
-              value={(field.attributes?.content as string) || ''}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                onChange({ attributes: { ...field.attributes, content: e.target.value } })
-              }
-              placeholder="Enter paragraph text"
-            />
-          </Field.Root>
-        )}
-      </Flex>
-    </Box>
+        <Modal.Footer>
+          <Modal.Close>
+            <Button variant="tertiary">Close</Button>
+          </Modal.Close>
+        </Modal.Footer>
+      </Modal.Content>
+    </Modal.Root>
   );
 };
