@@ -75,6 +75,25 @@ const { get, post, put, del } = useFetchClient();
 ### UI Components
 Use `@strapi/design-system` v2 components (Field, Modal, Tabs, Table, Card, Button, etc.).
 
+### TypeScript Export Rule
+**IMPORTANT**: When creating services, controllers, or policies, any interface or type used in the exported module's function signatures MUST be exported. The Strapi plugin build process (`strapi-plugin build`) generates type definitions and will fail with `TS4082: Default export of the module has or is using private name` if interfaces are not exported.
+
+```typescript
+// WRONG - will fail build
+interface MyContext { ... }  // private
+const myController = () => ({
+  async handler(ctx: MyContext) { ... }
+});
+export default myController;
+
+// CORRECT - interfaces used in exports must be exported
+export interface MyContext { ... }  // exported
+const myController = () => ({
+  async handler(ctx: MyContext) { ... }
+});
+export default myController;
+```
+
 ## Content Types
 
 Plugin defines two collection types hidden from Content Manager:

@@ -1,5 +1,9 @@
-import controller from './controller';
+import form from './form';
+import publicController from './public';
+import submission from './submission';
 
 export default {
-  controller,
+  form,
+  public: publicController,
+  submission,
 };

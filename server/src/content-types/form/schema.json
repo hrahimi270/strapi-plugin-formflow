@@ -1,0 +1,67 @@
+{
+  "kind": "collectionType",
+  "collectionName": "forms",
+  "info": {
+    "singularName": "form",
+    "pluralName": "forms",
+    "displayName": "Form",
+    "description": "Dynamic form definitions with configurable fields and settings"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": false
+    },
+    "content-type-builder": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true,
+      "maxLength": 255
+    },
+    "slug": {
+      "type": "uid",
+      "targetField": "title",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "fields": {
+      "type": "json",
+      "required": true,
+      "default": []
+    },
+    "settings": {
+      "type": "json",
+      "default": {}
+    },
+    "successMessage": {
+      "type": "text",
+      "default": "Thank you for your submission!"
+    },
+    "redirectUrl": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "submissionCount": {
+      "type": "integer",
+      "default": 0
+    },
+    "submissions": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "plugin::strapi-forms.form-submission",
+      "mappedBy": "form"
+    }
+  }
+}

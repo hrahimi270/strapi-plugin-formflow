@@ -1,0 +1,49 @@
+{
+  "kind": "collectionType",
+  "collectionName": "form_submissions",
+  "info": {
+    "singularName": "form-submission",
+    "pluralName": "form-submissions",
+    "displayName": "Form Submission",
+    "description": "Individual form submissions with data and metadata"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": false
+    },
+    "content-type-builder": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "form": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::strapi-forms.form",
+      "inversedBy": "submissions"
+    },
+    "data": {
+      "type": "json",
+      "required": true
+    },
+    "metadata": {
+      "type": "json",
+      "default": {}
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["new", "read", "archived"],
+      "default": "new"
+    },
+    "ipAddress": {
+      "type": "string",
+      "maxLength": 45
+    },
+    "userAgent": {
+      "type": "text"
+    }
+  }
+}
