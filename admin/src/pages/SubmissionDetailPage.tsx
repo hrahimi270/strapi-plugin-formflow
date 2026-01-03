@@ -282,7 +282,7 @@ export const SubmissionDetailPage = () => {
       <Box padding={8} background="neutral100">
         <Flex justifyContent="space-between" alignItems="center">
           <Flex alignItems="center" gap={4}>
-            <IconButton label="Back to submissions" onClick={handleBack} variant="tertiary">
+            <IconButton label="Back to submissions" onClick={handleBack} variant="tertiary" withTooltip={false}>
               <ArrowLeft />
             </IconButton>
             <Box>

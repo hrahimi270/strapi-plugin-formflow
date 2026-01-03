@@ -294,7 +294,7 @@ export const SubmissionsListPage = () => {
       <Box padding={8} background="neutral100">
         <Flex justifyContent="space-between" alignItems="center">
           <Flex alignItems="center" gap={4}>
-            <IconButton label="Back to forms" onClick={handleBack} variant="tertiary">
+            <IconButton label="Back to forms" onClick={handleBack} variant="tertiary" withTooltip={false}>
               <ArrowLeft />
             </IconButton>
             <Box>
@@ -441,6 +441,7 @@ export const SubmissionsListPage = () => {
                           label="View submission"
                           onClick={() => handleViewSubmission(submission.documentId)}
                           variant="ghost"
+                          withTooltip={false}
                         >
                           <Eye />
                         </IconButton>
@@ -451,6 +452,7 @@ export const SubmissionsListPage = () => {
                             setDeleteDialogOpen(true);
                           }}
                           variant="ghost"
+                          withTooltip={false}
                         >
                           <Trash />
                         </IconButton>

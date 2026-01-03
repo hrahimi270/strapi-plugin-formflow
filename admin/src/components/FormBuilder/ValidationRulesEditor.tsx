@@ -187,6 +187,7 @@ export const ValidationRulesEditor = ({
                     label="Remove rule"
                     onClick={() => handleRemoveRule(index)}
                     variant="ghost"
+                    withTooltip={false}
                   >
                     <Trash />
                   </IconButton>

@@ -304,6 +304,7 @@ export const FormsListPage = () => {
                             label="View submissions"
                             onClick={() => handleViewSubmissions(form)}
                             variant="ghost"
+                            withTooltip={false}
                           >
                             <Eye />
                           </IconButton>
@@ -311,6 +312,7 @@ export const FormsListPage = () => {
                             label="Edit form"
                             onClick={() => handleEditForm(form)}
                             variant="ghost"
+                            withTooltip={false}
                           >
                             <Pencil />
                           </IconButton>
@@ -318,6 +320,7 @@ export const FormsListPage = () => {
                             label="Duplicate form"
                             onClick={() => handleDuplicateForm(form)}
                             variant="ghost"
+                            withTooltip={false}
                             disabled={isDuplicating === form.documentId}
                           >
                             <Duplicate />
@@ -326,6 +329,7 @@ export const FormsListPage = () => {
                             label="Delete form"
                             onClick={() => handleDeleteClick(form)}
                             variant="ghost"
+                            withTooltip={false}
                           >
                             <Trash />
                           </IconButton>
