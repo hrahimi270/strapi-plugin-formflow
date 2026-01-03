@@ -4,14 +4,13 @@ import {
   Main,
   Box,
   Flex,
-  Grid,
   Typography,
   Button,
   Tabs,
   Field,
   TextInput,
   Textarea,
-  Toggle,
+  Checkbox,
   Loader,
   Link,
 } from '@strapi/design-system';
@@ -244,15 +243,16 @@ export const FormEditPage = () => {
           </Flex>
           <Flex gap={2} alignItems="center">
             {/* Active/Inactive Toggle */}
-            <Flex gap={2} alignItems="center" paddingRight={4}>
-              <Toggle
+            <Box paddingRight={4}>
+              <Checkbox
                 checked={formData.isActive}
                 onCheckedChange={(checked: boolean) => updateField('isActive', checked)}
-              />
-              <Typography textColor={formData.isActive ? 'success600' : 'neutral600'}>
-                {formData.isActive ? 'Active' : 'Inactive'}
-              </Typography>
-            </Flex>
+              >
+                <Typography textColor={formData.isActive ? 'success600' : 'neutral600'}>
+                  {formData.isActive ? 'Active' : 'Inactive'}
+                </Typography>
+              </Checkbox>
+            </Box>
 
             <Button variant="secondary" onClick={handleBack}>
               Cancel
@@ -290,45 +290,51 @@ export const FormEditPage = () => {
                 shadow="tableShadow"
                 borderColor="neutral150"
               >
-                <Typography variant="delta" fontWeight="bold" marginBottom={4}>
-                  Basic Information
-                </Typography>
+                <Box marginBottom={5}>
+                  <Typography variant="delta" fontWeight="bold">
+                    Basic Information
+                  </Typography>
+                </Box>
 
-                <Grid.Root gap={4} gridCols={12}>
-                  <Grid.Item col={6}>
-                    <Field.Root name="title" required>
-                      <Field.Label>Form Title</Field.Label>
-                      <TextInput
-                        value={formData.title}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleTitleChange(e.target.value)
-                        }
-                        placeholder="Contact Form"
-                      />
-                      <Field.Hint>A descriptive name for your form</Field.Hint>
-                    </Field.Root>
-                  </Grid.Item>
+                <Flex direction="column" gap={5} width="100%">
+                  {/* Title and Slug Row */}
+                  <Flex gap={6} width="100%">
+                    <Box flex="1">
+                      <Field.Root name="title" required>
+                        <Field.Label>Form Title</Field.Label>
+                        <TextInput
+                          value={formData.title}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            handleTitleChange(e.target.value)
+                          }
+                          placeholder="Contact Form"
+                        />
+                        <Field.Hint>A descriptive name for your form</Field.Hint>
+                      </Field.Root>
+                    </Box>
 
-                  <Grid.Item col={6}>
-                    <Field.Root name="slug" required>
-                      <Field.Label>Slug</Field.Label>
-                      <TextInput
-                        value={formData.slug}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          updateField('slug', e.target.value)
-                        }
-                        placeholder="contact-form"
-                        disabled={!isCreating}
-                      />
-                      <Field.Hint>
-                        {isCreating
-                          ? 'URL-friendly identifier (auto-generated from title)'
-                          : 'Cannot be changed after creation'}
-                      </Field.Hint>
-                    </Field.Root>
-                  </Grid.Item>
+                    <Box flex="1">
+                      <Field.Root name="slug" required>
+                        <Field.Label>Slug</Field.Label>
+                        <TextInput
+                          value={formData.slug}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            updateField('slug', e.target.value)
+                          }
+                          placeholder="contact-form"
+                          disabled={!isCreating}
+                        />
+                        <Field.Hint>
+                          {isCreating
+                            ? 'URL-friendly identifier (auto-generated from title)'
+                            : 'Cannot be changed after creation'}
+                        </Field.Hint>
+                      </Field.Root>
+                    </Box>
+                  </Flex>
 
-                  <Grid.Item col={12}>
+                  {/* Description - Full Width */}
+                  <Box width="100%">
                     <Field.Root name="description">
                       <Field.Label>Description (Optional)</Field.Label>
                       <Textarea
@@ -340,8 +346,8 @@ export const FormEditPage = () => {
                       />
                       <Field.Hint>Internal description for your reference</Field.Hint>
                     </Field.Root>
-                  </Grid.Item>
-                </Grid.Root>
+                  </Box>
+                </Flex>
               </Box>
 
               {/* Form Builder Component */}
