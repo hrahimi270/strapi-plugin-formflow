@@ -1,4 +1,4 @@
-import { Box, Flex, Typography } from '@strapi/design-system';
+import { Flex, Typography } from '@strapi/design-system';
 import { ReactNode } from 'react';
 
 interface EmptyStateProps {
@@ -13,18 +13,14 @@ interface EmptyStateProps {
  * Used throughout the plugin for empty lists and initial states
  */
 export const EmptyState = ({ title, description, action, icon }: EmptyStateProps) => (
-  <Box padding={10} textAlign="center" background="neutral100" hasRadius>
-    <Flex direction="column" alignItems="center" gap={4}>
-      {icon && (
-        <Box padding={4} background="neutral200" hasRadius>
-          {icon}
-        </Box>
-      )}
-      <Typography variant="delta" fontWeight="bold">
+  <Flex direction="column" padding="64px" width="100%" gap="24px" background="white" hasRadius shadow='0px 1px 4px rgba(33, 33, 52, 0.1)'>
+    {icon && icon}
+    <Flex direction="column" gap="16px">
+      <Typography fontSize="1.6rem" textColor="neutral600">
         {title}
       </Typography>
-      <Typography textColor="neutral600">{description}</Typography>
-      {action && <Box paddingTop={2}>{action}</Box>}
+      {/* <Typography textColor="neutral600">{description}</Typography> */}
+      {action && action}
     </Flex>
-  </Box>
+  </Flex>
 );
