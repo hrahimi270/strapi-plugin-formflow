@@ -215,40 +215,59 @@ export const FormsListPage = () => {
           />
         </>
       ) : (
-        <Flex direction="column" gap='16px' alignItems="start" width="100%">
+        <Flex direction="column" gap="16px" alignItems="stretch" width="100%">
           {/* Search Bar */}
-          <Searchbar
-            name="search"
-            placeholder="Search forms..."
-            value={searchValue}
-            onChange={handleSearchChange}
-            onClear={handleSearchClear}
-            clearLabel="Clear search"
-          >
-            Search
-          </Searchbar>
+          <Flex>
+            <Searchbar
+              name="search"
+              placeholder="Search forms..."
+              value={searchValue}
+              onChange={handleSearchChange} // Fix it later!
+              onClear={handleSearchClear}
+              clearLabel="Clear search"
+            >
+              Search
+            </Searchbar>
+          </Flex>
 
           {/* Forms Table */}
           {filteredForms.length === 0 ? (
-            <EmptyState
-              title="No forms found"
-              description={`No forms match "${searchValue}"`}
-              action={
-                <Button variant="secondary" onClick={handleSearchClear}>
-                  Clear search
-                </Button>
-              }
-            />
+            <>
+              <EmptyState
+                title="No forms found"
+                description={`No forms match "${searchValue}"`}
+                action={
+                  <Button variant="secondary" height="3.2rem" onClick={handleSearchClear}>
+                    Clear search
+                  </Button>
+                }
+              />
+            </>
           ) : (
             <Table
-              colCount={colCount}
-              rowCount={rowCount}
               footer={
-                <Box padding={4} background="neutral100">
-                  <Typography variant="pi" textColor="neutral600">
-                    Showing {filteredForms.length} of {forms.length} forms
+                <Flex
+                  gap="12px"
+                  cursor="pointer"
+                  background="primary100"
+                  padding="20px"
+                  onClick={handleCreateForm}
+                >
+                  <Flex
+                    justifyContent="center"
+                    alignItems="center"
+                    width="2.4rem"
+                    height="2.4rem"
+                    background="primary200"
+                    borderRadius="50%"
+                  >
+                    <Plus color="primary600" width="1rem" height="1rem" />
+                  </Flex>
+                  <Typography variant="pi" fontWeight="bold" textColor="#4945ff">
+                    {/* Showing {filteredForms.length} of {forms.length} forms */}
+                    Add another form
                   </Typography>
-                </Box>
+                </Flex>
               }
             >
               <Thead>
