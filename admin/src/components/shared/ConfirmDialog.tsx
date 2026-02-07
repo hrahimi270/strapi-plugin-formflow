@@ -12,7 +12,7 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   variant?: 'danger' | 'success' | 'default';
   isConfirming?: boolean;
-  icon?: ReactNode;
+  icon?: ReactNode; // Not-optional in the future!
 }
 
 /**
@@ -42,34 +42,37 @@ export const ConfirmDialog = ({
   };
 
   return (
-    <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
-      <Dialog.Content>
-        <Dialog.Header>{title}</Dialog.Header>
-        <Dialog.Body>
-          <Flex direction="column" alignItems="center" gap={4} padding={4}>
-            {icon ||
-              (variant === 'danger' && <WarningCircle width={48} height={48} fill="danger600" />)}
-            <Typography textAlign="center" textColor="neutral800">
-              {message}
-            </Typography>
-          </Flex>
-        </Dialog.Body>
-        <Dialog.Footer>
-          <Dialog.Cancel>
-            <Button variant="tertiary" disabled={isConfirming}>
-              {cancelLabel}
-            </Button>
-          </Dialog.Cancel>
-          <Button
-            variant={variant}
-            onClick={handleConfirm}
-            loading={isConfirming}
-            disabled={isConfirming}
-          >
-            {confirmLabel}
-          </Button>
-        </Dialog.Footer>
-      </Dialog.Content>
-    </Dialog.Root>
+    <>
+      <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
+        <Dialog.Content>
+          <Dialog.Header>{title}</Dialog.Header>
+          <Dialog.Body>
+            <Flex direction="column" alignItems="center" gap="8px">
+              {icon && icon}
+              <Typography textAlign="center" textColor="neutral800">
+                {message}
+              </Typography>
+            </Flex>
+          </Dialog.Body>
+          <Dialog.Footer display="flex" gap="8px">
+            <Dialog.Cancel flex="1" height="3.2rem">
+              <Button variant="tertiary" disabled={isConfirming}>
+                {cancelLabel}
+              </Button>
+            </Dialog.Cancel>
+            <Dialog.Action flex="1" height="3.2rem">
+              <Button
+                variant={variant}
+                onClick={handleConfirm}
+                loading={isConfirming}
+                disabled={isConfirming}
+              >
+                {confirmLabel}
+              </Button>
+            </Dialog.Action>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
+    </>
   );
 };

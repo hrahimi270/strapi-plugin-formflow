@@ -11,17 +11,19 @@ import {
   Tr,
   Th,
   Td,
-  IconButton,
   Badge,
   Searchbar,
   Loader,
 } from '@strapi/design-system';
-import { Plus, Pencil, Trash, Eye, Duplicate, Files } from '@strapi/icons';
+import { Plus, Trash, Eye, Duplicate, Files, WarningCircle } from '@strapi/icons';
 import { Page, useNotification } from '@strapi/strapi/admin';
 
 import { useForms } from '../hooks';
 import { EmptyState, ConfirmDialog } from '../components/shared';
 import type { Form } from '../utils/api';
+import TooltipIconButton from '../components/shared/TooltipIconButton';
+import TypographyTD from '../components/shared/TypographyTD';
+import BadgeTD from '../components/shared/BadgeTD';
 
 /**
  * Forms List Page - Main landing page for the plugin
@@ -174,8 +176,11 @@ export const FormsListPage = () => {
   }
 
   // Column count for table
-  const colCount = 5;
-  const rowCount = filteredForms.length;
+  // const colCount = 5;
+  // const rowCount = filteredForms.length;
+
+  const TABLE_HEADERS = ['Title', 'Slug', 'Submissions', 'Status', 'Actions'];
+  const NUMBER_OF_COLUMNS = TABLE_HEADERS.length;
 
   return (
     <Flex paddingLeft="56px" paddingRight="56px" paddingTop="24px" direction="column" gap="40px">
@@ -271,90 +276,74 @@ export const FormsListPage = () => {
               }
             >
               <Thead>
-                <Tr>
-                  <Th>
-                    <Typography variant="sigma" textColor="neutral600">
-                      Title
-                    </Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma" textColor="neutral600">
-                      Slug
-                    </Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma" textColor="neutral600">
-                      Submissions
-                    </Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma" textColor="neutral600">
-                      Status
-                    </Typography>
-                  </Th>
-                  <Th>
-                    <Typography variant="sigma" textColor="neutral600">
-                      Actions
-                    </Typography>
-                  </Th>
+                <Tr display="flex" width="100%">
+                  {TABLE_HEADERS.map((header) => (
+                    <Th key={header} flex="1" display="flex">
+                      <Flex width="100%" height="100%" alignItems="center">
+                        <Typography variant="sigma" textColor="neutral600">
+                          {header}
+                        </Typography>
+                      </Flex>
+                    </Th>
+                  ))}
                 </Tr>
               </Thead>
               <Tbody>
-                {filteredForms.map((form) => (
-                  <Tr key={form.documentId}>
-                    <Td>
-                      <Typography fontWeight="bold">{form.title}</Typography>
-                    </Td>
-                    <Td>
-                      <Typography textColor="neutral600">{form.slug}</Typography>
-                    </Td>
-                    <Td>
-                      <Badge>{form.submissionCount}</Badge>
-                    </Td>
-                    <Td>
-                      <Badge variant={form.isActive ? 'success' : 'secondary'}>
-                        {form.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </Td>
-                    <Td>
-                      <Flex gap={1}>
-                        <IconButton
-                          label="View submissions"
-                          onClick={() => handleViewSubmissions(form)}
-                          variant="ghost"
-                          withTooltip={false}
-                        >
-                          <Eye />
-                        </IconButton>
-                        <IconButton
-                          label="Edit form"
-                          onClick={() => handleEditForm(form)}
-                          variant="ghost"
-                          withTooltip={false}
-                        >
-                          <Pencil />
-                        </IconButton>
-                        <IconButton
-                          label="Duplicate form"
-                          onClick={() => handleDuplicateForm(form)}
-                          variant="ghost"
-                          withTooltip={false}
-                          disabled={isDuplicating === form.documentId}
-                        >
-                          <Duplicate />
-                        </IconButton>
-                        <IconButton
-                          label="Delete form"
-                          onClick={() => handleDeleteClick(form)}
-                          variant="ghost"
-                          withTooltip={false}
-                        >
-                          <Trash />
-                        </IconButton>
-                      </Flex>
-                    </Td>
-                  </Tr>
-                ))}
+                {filteredForms.map((form) => {
+                  const isActive = form.isActive;
+                  const formActions = [
+                    {
+                      label: 'View submissions',
+                      icon: <Eye />,
+                      handler: () => handleViewSubmissions(form),
+                    },
+                    {
+                      label: 'Duplicate form',
+                      icon: <Duplicate />,
+                      handler: () => handleDuplicateForm(form),
+                    },
+                    {
+                      label: 'Delete form',
+                      icon: <Trash />,
+                      handler: () => handleDeleteClick(form),
+                    },
+                  ];
+
+                  return (
+                    <Tr
+                      key={form.documentId}
+                      onClick={() => handleEditForm(form)}
+                      cursor="pointer"
+                      title="Edit form"
+                      display="flex"
+                      width="100%"
+                    >
+                      <TypographyTD text={form.title} />
+                      <TypographyTD text={form.slug} />
+                      <BadgeTD text={`${form.submissionCount}`} badgeVariant="neutral" />
+                      <BadgeTD
+                        text={isActive ? 'Active' : 'Inactive'}
+                        badgeVariant={isActive ? 'success' : 'danger'}
+                      />
+                      <Td flex="1">
+                        <Flex gap="4px">
+                          {formActions.map((formAction, index) => (
+                            <TooltipIconButton
+                              key={index} // or better: key={action.label}
+                              label={formAction.label}
+                              onClick={(event: MouseEvent) => {
+                                event.stopPropagation();
+                                formAction.handler();
+                              }}
+                            >
+                              {formAction.icon}
+                            </TooltipIconButton>
+                          ))}
+                        </Flex>
+                      </Td>
+                    </Tr>
+                  );
+                })}
               </Tbody>
             </Table>
           )}
@@ -366,12 +355,13 @@ export const FormsListPage = () => {
         isOpen={deleteDialogOpen}
         onClose={handleDeleteCancel}
         onConfirm={handleDeleteConfirm}
-        title="Delete Form"
+        title="Delete Form Confirmation"
         message={`Are you sure you want to delete "${formToDelete?.title}"? This will also delete all associated submissions. This action cannot be undone.`}
-        confirmLabel="Delete"
+        confirmLabel="Confirm"
         cancelLabel="Cancel"
         variant="danger"
         isConfirming={isDeleting}
+        icon={<WarningCircle width={24} height={24} fill="danger600" />}
       />
     </Flex>
   );
