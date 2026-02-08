@@ -11,11 +11,11 @@ import {
   Tr,
   Th,
   Td,
-  Badge,
   Searchbar,
   Loader,
+  Link,
 } from '@strapi/design-system';
-import { Plus, Trash, Eye, Duplicate, Files, WarningCircle } from '@strapi/icons';
+import { Plus, Trash, Eye, Duplicate, Files, WarningCircle, ArrowLeft } from '@strapi/icons';
 import { Page, useNotification } from '@strapi/strapi/admin';
 
 import { useForms } from '../hooks';
@@ -24,6 +24,10 @@ import type { Form } from '../utils/api';
 import TooltipIconButton from '../components/shared/TooltipIconButton';
 import TypographyTD from '../components/shared/TypographyTD';
 import BadgeTD from '../components/shared/BadgeTD';
+import Heading from '../components/shared/Heading';
+import SubHeading from '../components/shared/SubHeading';
+import BackButton from '../components/shared/BackButton';
+import HeadingContainer from '../components/shared/HeadingContainer';
 
 /**
  * Forms List Page - Main landing page for the plugin
@@ -34,6 +38,12 @@ export const FormsListPage = () => {
   const { toggleNotification } = useNotification();
 
   const { forms, isLoading, error, refetch, deleteForm, duplicateForm } = useForms();
+
+  // Hard-coded data
+  const TABLE_HEADERS = ['Title', 'Slug', 'Submissions', 'Status', 'Actions'];
+  const NUMBER_OF_FORMS = forms.length;
+  const ENTRY_SINGULAR = 'entry';
+  const ENTRY_PLURAL = 'entries';
 
   // Search state
   const [searchValue, setSearchValue] = useState('');
@@ -58,6 +68,10 @@ export const FormsListPage = () => {
         form.slug.toLowerCase().includes(searchLower)
     );
   }, [forms, searchValue]);
+
+  const handleBack = useCallback(() => {
+    navigate(`/`);
+  }, [navigate]);
 
   // Handle search input change
   const handleSearchChange = useCallback((value: string) => {
@@ -175,32 +189,26 @@ export const FormsListPage = () => {
     );
   }
 
-  // Column count for table
-  // const colCount = 5;
-  // const rowCount = filteredForms.length;
-
-  const TABLE_HEADERS = ['Title', 'Slug', 'Submissions', 'Status', 'Actions'];
-  const NUMBER_OF_COLUMNS = TABLE_HEADERS.length;
-
   return (
-    <Flex paddingLeft="56px" paddingRight="56px" paddingTop="24px" direction="column" gap="40px">
+    <Flex paddingLeft="56px" paddingRight="56px" paddingTop="24px" paddingBottom="24px" direction="column" gap="40px">
       {/* Header Section */}
-      <Flex direction="column" alignItems="start" gap="12px" width="100%">
-        <Flex justifyContent="space-between" alignItems="center" width="100%">
-          <Typography fontSize="3.2rem" variant="delta" as="h1">
-            Forms
-          </Typography>
-          <Button height="3.2rem" startIcon={<Plus color="white" />} onClick={handleCreateForm}>
-            Create Form
-          </Button>
-        </Flex>
-        <Typography fontSize="1.6rem" variant="epsilon" textColor="#666687">
-          Create and manage your forms
-        </Typography>
+      <Flex direction="column" width="100%" gap="12px">
+        <BackButton handleBack={handleBack} />
+        <HeadingContainer>
+          <Flex justifyContent="space-between" alignItems="center" width="100%">
+            <Heading text="Forms" textColor="neutral800" />
+            <Button height="3.2rem" startIcon={<Plus color="white" />} onClick={handleCreateForm}>
+              Create Form
+            </Button>
+          </Flex>
+          <SubHeading
+            text={`${NUMBER_OF_FORMS} ${NUMBER_OF_FORMS === 0 ? ENTRY_PLURAL : NUMBER_OF_FORMS === 1 ? ENTRY_SINGULAR : ENTRY_PLURAL} found`}
+          />
+        </HeadingContainer>
       </Flex>
 
       {/* Content Section */}
-      {forms.length === 0 ? (
+      {NUMBER_OF_FORMS === 0 ? (
         <>
           {/* Empty State */}
           <EmptyState
