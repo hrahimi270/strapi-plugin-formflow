@@ -9,12 +9,10 @@ import {
   Field,
   TextInput,
   Textarea,
-  Checkbox,
   Loader,
   Toggle,
   Grid,
 } from '@strapi/design-system';
-import { ArrowLeft, Check, Plus } from '@strapi/icons';
 import { Page, useNotification } from '@strapi/strapi/admin';
 
 import { useForm } from '../hooks';
@@ -34,6 +32,9 @@ import Heading from '../components/shared/Heading';
 import SubHeading from '../components/shared/SubHeading';
 import HeadingContainer from '../components/shared/HeadingContainer';
 import BackButton from '../components/shared/BackButton';
+import FormInputField from '../components/shared/FormInputField';
+import FormTextareaField from '../components/shared/FormTextareaField';
+import SidebarItemContainer from '../components/shared/SidebarItemContainer';
 
 /**
  * Default form settings used when creating a new form
@@ -238,16 +239,6 @@ export const FormEditPage = () => {
       direction="column"
       gap="56px"
     >
-      {/* Save Button */}
-      {/* <Button
-        startIcon={<Check />}
-        onClick={handleSave}
-        loading={isSaving}
-        disabled={isSaving || (!hasChanges && !isCreating)}
-      >
-        {isCreating ? 'Create' : 'Save'}
-      </Button> */}
-
       {/* toggle switch button */}
       {/* <Checkbox
         checked={formData.isActive}
@@ -260,7 +251,9 @@ export const FormEditPage = () => {
 
       {/* Header */}
       <Flex direction="column" width="100%" gap="12px">
-        <BackButton handleBack={handleBack} />
+        <Box width="100%">
+          <BackButton handleBack={handleBack} />
+        </Box>
         <HeadingContainer>
           <Heading text={isCreating ? 'Create Form' : 'Edit Form'} textColor="neutral800" />
           <SubHeading
@@ -272,170 +265,151 @@ export const FormEditPage = () => {
       </Flex>
 
       <Grid.Root gap="16px" width="100%">
-        <Grid.Item s={9}>
-          <Flex width="100%" direction="column" gap="16px">
-            <Box width="100%">
-              <Toggle onLabel="Activate" offLabel="Deactivate" onChange={handleFormActivation} />
-            </Box>
-            {/* Content with Tabs */}
-            <Tabs.Root defaultValue="builder">
-              <Tabs.List>
-                <Tabs.Trigger value="builder">Form Builder</Tabs.Trigger>
-                <Tabs.Trigger value="settings">Settings</Tabs.Trigger>
-                <Tabs.Trigger value="notifications">Notifications</Tabs.Trigger>
-              </Tabs.List>
+        <Grid.Item s={9} >
+          <Tabs.Root defaultValue="builder">
+            <Tabs.List>
+              <Tabs.Trigger value="builder">Form Builder</Tabs.Trigger>
+              <Tabs.Trigger value="settings">Settings</Tabs.Trigger>
+              <Tabs.Trigger value="notifications">Notifications</Tabs.Trigger>
+            </Tabs.List>
 
-              {/* Form Builder Tab */}
-              <Tabs.Content value="builder">
-                {/* Basic Info Fields */}
-                <Box
-                  marginBottom={6}
-                  padding={6}
-                  background="neutral0"
-                  hasRadius
-                  shadow="0px 1px 4px rgba(33, 33, 52, 0.1)"
-                  borderColor="neutral150"
-                >
-                  <Box marginBottom={5}>
-                    <Typography variant="delta" fontWeight="bold">
-                      Basic Information
-                    </Typography>
-                  </Box>
-
-                  <Flex direction="column" gap={5} width="100%">
-                    {/* Title and Slug Row */}
-                    <Flex gap={6} width="100%">
-                      <Box flex="1">
-                        <Field.Root name="title" required>
-                          <Field.Label>Form Title</Field.Label>
-                          <TextInput
-                            value={formData.title}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              handleTitleChange(e.target.value)
-                            }
-                            placeholder="Contact Form"
-                          />
-                          <Field.Hint>A descriptive name for your form</Field.Hint>
-                        </Field.Root>
-                      </Box>
-
-                      <Box flex="1">
-                        <Field.Root name="slug" required>
-                          <Field.Label>Slug</Field.Label>
-                          <TextInput
-                            value={formData.slug}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              updateField('slug', e.target.value)
-                            }
-                            placeholder="contact-form"
-                            disabled={!isCreating}
-                          />
-                          <Field.Hint>
-                            {isCreating
-                              ? 'URL-friendly identifier (auto-generated from title)'
-                              : 'Cannot be changed after creation'}
-                          </Field.Hint>
-                        </Field.Root>
-                      </Box>
-                    </Flex>
-
-                    {/* Description - Full Width */}
-                    <Box width="100%">
-                      <Field.Root name="description">
-                        <Field.Label>Description (Optional)</Field.Label>
-                        <Textarea
-                          value={formData.description}
-                          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                            updateField('description', e.target.value)
-                          }
-                          placeholder="A brief description of what this form is for..."
-                        />
-                        <Field.Hint>Internal description for your reference</Field.Hint>
-                      </Field.Root>
+            <Tabs.Content value="builder">
+              <Flex padding="24px" direction="column" gap="24px">
+                <Flex direction="column" gap="24px" width="100%">
+                  {/* Title and Slug Row */}
+                  <Flex gap="16px" width="100%">
+                    <Box flex="1">
+                      <FormInputField
+                        name="title"
+                        value={formData.title}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          handleTitleChange(e.target.value);
+                        }}
+                        required
+                        label="Name"
+                        placeholder="A descriptive name for your form"
+                        hint="This name is shown in the admin panel and used to identify the form."
+                      />
+                    </Box>
+                    <Box flex="1">
+                      <FormInputField
+                        disabled={!isCreating}
+                        name="slug"
+                        value={formData.slug}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          updateField('slug', e.target.value)
+                        }
+                        required
+                        label="Slug"
+                        placeholder="Slug of the form"
+                        hint={
+                          isCreating
+                            ? 'Automatically generated from the form name.'
+                            : 'Cannot be changed after creation.'
+                        }
+                      />
                     </Box>
                   </Flex>
-                </Box>
+
+                  {/* Description - Full Width */}
+                  <Box width="100%">
+                    <FormTextareaField
+                      hint="Description for your reference"
+                      label="Description"
+                      name="description"
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        updateField('description', e.target.value)
+                      }
+                      placeholder="A brief description of what this form is for..."
+                      required={false}
+                      value={formData.description}
+                    />
+                  </Box>
+                </Flex>
 
                 {/* Form Builder Component */}
                 <FormBuilder
                   fields={formData.fields}
                   onChange={(fields) => updateField('fields', fields)}
                 />
-              </Tabs.Content>
+              </Flex>
+            </Tabs.Content>
 
-              {/* Settings Tab */}
-              <Tabs.Content value="settings">
-                {/* new toggle switch button */}
-                <FormSettings
-                  settings={formData.settings}
-                  successMessage={formData.successMessage}
-                  redirectUrl={formData.redirectUrl}
-                  showResetButton={formData.settings.showResetButton ?? false}
-                  onSettingsChange={(settings) => updateField('settings', settings)}
-                  onSuccessMessageChange={(value) => updateField('successMessage', value)}
-                  onRedirectUrlChange={(value) => updateField('redirectUrl', value)}
-                  onShowResetButtonChange={(value) =>
-                    updateField('settings', { ...formData.settings, showResetButton: value })
-                  }
-                />
-              </Tabs.Content>
+            <Tabs.Content value="settings">
+              <FormSettings
+                settings={formData.settings}
+                successMessage={formData.successMessage}
+                redirectUrl={formData.redirectUrl}
+                showResetButton={formData.settings.showResetButton ?? false}
+                onSettingsChange={(settings) => updateField('settings', settings)}
+                onSuccessMessageChange={(value) => updateField('successMessage', value)}
+                onRedirectUrlChange={(value) => updateField('redirectUrl', value)}
+                onShowResetButtonChange={(value) =>
+                  updateField('settings', { ...formData.settings, showResetButton: value })
+                }
+              />
+            </Tabs.Content>
 
-              {/* Notifications Tab */}
-              <Tabs.Content value="notifications">
-                <Flex direction="column" gap={6}>
-                  {/* Email Notifications */}
-                  <Box
-                    padding={6}
-                    background="neutral0"
-                    hasRadius
-                    shadowshadow="0px 1px 4px rgba(33, 33, 52, 0.1)"
-                    borderColor="neutral150"
-                  >
-                    <EmailSettings
-                      notifications={formData.settings.emailNotifications || []}
-                      onChange={(emailNotifications: EmailNotification[]) =>
-                        updateField('settings', { ...formData.settings, emailNotifications })
-                      }
-                    />
-                  </Box>
+            <Tabs.Content value="notifications">
+              <Flex direction="column" gap={6}>
+                {/* Email Notifications */}
+                <Box
+                  padding={6}
+                  background="neutral0"
+                  hasRadius
+                  shadowshadow="0px 1px 4px rgba(33, 33, 52, 0.1)"
+                  borderColor="neutral150"
+                >
+                  <EmailSettings
+                    notifications={formData.settings.emailNotifications || []}
+                    onChange={(emailNotifications: EmailNotification[]) =>
+                      updateField('settings', { ...formData.settings, emailNotifications })
+                    }
+                  />
+                </Box>
 
-                  {/* Webhooks */}
-                  <Box
-                    padding={6}
-                    background="neutral0"
-                    hasRadius
-                    shadow="0px 1px 4px rgba(33, 33, 52, 0.1)"
-                    borderColor="neutral150"
-                  >
-                    <WebhookSettings
-                      webhooks={formData.settings.webhooks || []}
-                      onChange={(webhooks: WebhookConfig[]) =>
-                        updateField('settings', { ...formData.settings, webhooks })
-                      }
-                    />
-                  </Box>
-                </Flex>
-              </Tabs.Content>
-            </Tabs.Root>
-          </Flex>
+                {/* Webhooks */}
+                <Box
+                  padding={6}
+                  background="neutral0"
+                  hasRadius
+                  shadow="0px 1px 4px rgba(33, 33, 52, 0.1)"
+                  borderColor="neutral150"
+                >
+                  <WebhookSettings
+                    webhooks={formData.settings.webhooks || []}
+                    onChange={(webhooks: WebhookConfig[]) =>
+                      updateField('settings', { ...formData.settings, webhooks })
+                    }
+                  />
+                </Box>
+              </Flex>
+            </Tabs.Content>
+          </Tabs.Root>
         </Grid.Item>
-        <Grid.Item s={3}>
-          <Box width="100%">
-            <Flex direction="column" gap="12px" padding="16px" background="white">
-              <Typography alignItems="start" variant="sigma" textColor="#666687">
-                Entry
-              </Typography>
-              <Button
-                height="3.2rem"
-                width="100%"
-                onClick={handleSave}
-                loading={isSaving}
-                disabled={isSaving || (!hasChanges && !isCreating)}
-              >
-                {isCreating ? 'Create' : 'Save'}
-              </Button>
-            </Flex>
-          </Box>
+        <Grid.Item s={3} direction="column" gap="16px">
+          <SidebarItemContainer>
+            <Typography width="100%" alignItems="start" variant="sigma" textColor="#666687">
+              Activation
+            </Typography>
+            <Box width="100%">
+              <Toggle onLabel="Active" offLabel="Deactive" onChange={handleFormActivation} />
+            </Box>
+          </SidebarItemContainer>
+          <SidebarItemContainer>
+            <Typography width="100%" alignItems="start" variant="sigma" textColor="#666687">
+              Entry
+            </Typography>
+            <Button
+              width="100%"
+              height="3.2rem"
+              onClick={handleSave}
+              loading={isSaving}
+              disabled={isSaving || (!hasChanges && !isCreating)}
+            >
+              {isCreating ? 'Create' : 'Save'}
+            </Button>
+          </SidebarItemContainer>
         </Grid.Item>
       </Grid.Root>
     </Flex>

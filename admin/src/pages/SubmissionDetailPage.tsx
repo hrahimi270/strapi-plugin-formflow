@@ -22,8 +22,8 @@ import { ArrowLeft, Trash } from '@strapi/icons';
 import { API, FormSubmissionDetail, SubmissionStatus, ApiResponse, FormField } from '../utils/api';
 import { PLUGIN_ID } from '../pluginId';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { ConfirmDialog } from '../components/shared/ConfirmDialog';
-import { EmptyState } from '../components/shared/EmptyState';
+import ConfirmDialog from '../components/shared/ConfirmDialog';
+import EmptyState from '../components/shared/EmptyState';
 
 /**
  * Status options for the dropdown
@@ -237,13 +237,15 @@ export const SubmissionDetailPage = () => {
       <Main>
         <Box padding={8}>
           <EmptyState
-            title="Error loading submission"
-            description={error.message}
-            action={
-              <Button onClick={() => fetchSubmission()} variant="secondary">
-                Try again
-              </Button>
-            }
+            text="Error loading submission"
+            buttonText='Try again'
+            // description={error.message}
+            action={() => fetchSubmission()}
+            // action={
+            //   <Button onClick={() => fetchSubmission()} variant="secondary">
+            //     Try again
+            //   </Button>
+            // }
           />
         </Box>
       </Main>
@@ -256,13 +258,15 @@ export const SubmissionDetailPage = () => {
       <Main>
         <Box padding={8}>
           <EmptyState
-            title="Submission not found"
-            description="The submission you are looking for does not exist or has been deleted."
-            action={
-              <Button onClick={() => navigate(`/plugins/${PLUGIN_ID}`)} variant="secondary">
-                Back to Forms
-              </Button>
-            }
+            text="Submission not found"
+            buttonText='Back to Forms'
+            // description="The submission you are looking for does not exist or has been deleted."
+            action={() => navigate(`/plugins/${PLUGIN_ID}`)}
+            // action={
+            //   <Button onClick={() => navigate(`/plugins/${PLUGIN_ID}`)} variant="secondary">
+            //     Back to Forms
+            //   </Button>
+            // }
           />
         </Box>
       </Main>

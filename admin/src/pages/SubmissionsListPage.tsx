@@ -30,9 +30,9 @@ import { ArrowLeft, Trash, Download, Eye } from '@strapi/icons';
 import { useSubmissions } from '../hooks/useSubmissions';
 import { useForm } from '../hooks/useForm';
 import { PLUGIN_ID } from '../pluginId';
-import { ConfirmDialog } from '../components/shared/ConfirmDialog';
+import ConfirmDialog from '../components/shared/ConfirmDialog';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { EmptyState } from '../components/shared/EmptyState';
+import EmptyState from '../components/shared/EmptyState';
 import { SubmissionStatus } from '../utils/api';
 
 /**
@@ -272,13 +272,15 @@ export const SubmissionsListPage = () => {
       <Main>
         <Box padding={8}>
           <EmptyState
-            title="Error loading submissions"
-            description={error.message}
-            action={
-              <Button onClick={() => refetch()} variant="secondary">
-                Try again
-              </Button>
-            }
+            text="Error loading submissions"
+            buttonText='Try again'
+            // description={error.message}
+            action={() => refetch()}
+            // action={
+            //   <Button onClick={() => refetch()} variant="secondary">
+            //     Try again
+            //   </Button>
+            // }
           />
         </Box>
       </Main>
@@ -362,19 +364,21 @@ export const SubmissionsListPage = () => {
         {/* Empty state */}
         {submissions.length === 0 ? (
           <EmptyState
-            title="No submissions yet"
-            description={
-              filters.status
-                ? `No submissions with status "${filters.status}" found.`
-                : 'This form has not received any submissions yet.'
-            }
-            action={
-              filters.status ? (
-                <Button onClick={handleClearStatusFilter} variant="secondary">
-                  Clear filter
-                </Button>
-              ) : undefined
-            }
+            text="No submissions yet"
+            buttonText='Clear filter'
+            // description={
+            //   filters.status
+            //     ? `No submissions with status "${filters.status}" found.`
+            //     : 'This form has not received any submissions yet.'
+            // }
+            action={handleClearStatusFilter}
+            // action={
+            //   filters.status ? (
+            //     <Button onClick={handleClearStatusFilter} variant="secondary">
+            //       Clear filter
+            //     </Button>
+            //   ) : undefined
+            // }
           />
         ) : (
           <>

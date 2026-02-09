@@ -7,7 +7,7 @@ interface BackButtonProps {
 
 const BackButton = ({ handleBack }: BackButtonProps) => {
   return (
-    <Link width="100%" startIcon={<ArrowLeft />} onClick={handleBack}>
+    <Link startIcon={<ArrowLeft />} onClick={handleBack}>
       Back
     </Link>
   );

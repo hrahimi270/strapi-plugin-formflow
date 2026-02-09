@@ -15,19 +15,22 @@ import {
   Loader,
   Link,
 } from '@strapi/design-system';
-import { Plus, Trash, Eye, Duplicate, Files, WarningCircle, ArrowLeft } from '@strapi/icons';
+import { Plus, Trash, Eye, Duplicate, Files, WarningCircle } from '@strapi/icons';
 import { Page, useNotification } from '@strapi/strapi/admin';
 
 import { useForms } from '../hooks';
-import { EmptyState, ConfirmDialog } from '../components/shared';
 import type { Form } from '../utils/api';
 import TooltipIconButton from '../components/shared/TooltipIconButton';
-import TypographyTD from '../components/shared/TypographyTD';
-import BadgeTD from '../components/shared/BadgeTD';
+import TableTypography from '../components/shared/TableTypography';
+import TableBadge from '../components/shared/TableBadge';
 import Heading from '../components/shared/Heading';
 import SubHeading from '../components/shared/SubHeading';
 import BackButton from '../components/shared/BackButton';
+import ConfirmDialog from '../components/shared/ConfirmDialog';
+import EmptyState from '../components/shared/EmptyState';
 import HeadingContainer from '../components/shared/HeadingContainer';
+import AddNewButton from '../components/shared/AddNewButton';
+import AddMoreButton from '../components/shared/AddMoreButton';
 
 /**
  * Forms List Page - Main landing page for the plugin
@@ -38,10 +41,10 @@ export const FormsListPage = () => {
   const { toggleNotification } = useNotification();
 
   const { forms, isLoading, error, refetch, deleteForm, duplicateForm } = useForms();
+  const numberOfForms = forms.length;
 
   // Hard-coded data
   const TABLE_HEADERS = ['Title', 'Slug', 'Submissions', 'Status', 'Actions'];
-  const NUMBER_OF_FORMS = forms.length;
   const ENTRY_SINGULAR = 'entry';
   const ENTRY_PLURAL = 'entries';
 
@@ -176,13 +179,15 @@ export const FormsListPage = () => {
         <Page.Title>Forms</Page.Title>
         <Box padding={8}>
           <EmptyState
-            title="Error loading forms"
-            description={error.message}
-            action={
-              <Button onClick={() => refetch()} variant="secondary">
-                Try again
-              </Button>
-            }
+            text="Error loading forms"
+            buttonText='Try again'
+            // description={error.message}
+            action={() => refetch()}
+            // action={
+            //   <Button onClick={() => refetch()} variant="secondary">
+            //     Try again
+            //   </Button>
+            // }
           />
         </Box>
       </Page.Main>
@@ -190,41 +195,40 @@ export const FormsListPage = () => {
   }
 
   return (
-    <Flex paddingLeft="56px" paddingRight="56px" paddingTop="24px" paddingBottom="24px" direction="column" gap="40px">
+    <Flex
+      paddingLeft="56px"
+      paddingRight="56px"
+      paddingTop="24px"
+      paddingBottom="24px"
+      direction="column"
+      gap="40px"
+    >
       {/* Header Section */}
       <Flex direction="column" width="100%" gap="12px">
-        <BackButton handleBack={handleBack} />
+        <Box width="100%">
+          <BackButton handleBack={handleBack} />
+        </Box>
         <HeadingContainer>
           <Flex justifyContent="space-between" alignItems="center" width="100%">
             <Heading text="Forms" textColor="neutral800" />
-            <Button height="3.2rem" startIcon={<Plus color="white" />} onClick={handleCreateForm}>
-              Create Form
-            </Button>
+            <AddNewButton text="Create form" onClick={handleCreateForm} />
           </Flex>
           <SubHeading
-            text={`${NUMBER_OF_FORMS} ${NUMBER_OF_FORMS === 0 ? ENTRY_PLURAL : NUMBER_OF_FORMS === 1 ? ENTRY_SINGULAR : ENTRY_PLURAL} found`}
+            text={`${numberOfForms} ${numberOfForms === 0 ? ENTRY_PLURAL : numberOfForms === 1 ? ENTRY_SINGULAR : ENTRY_PLURAL} found`}
           />
         </HeadingContainer>
       </Flex>
 
       {/* Content Section */}
-      {NUMBER_OF_FORMS === 0 ? (
+      {numberOfForms === 0 ? (
         <>
           {/* Empty State */}
           <EmptyState
-            title="No forms yet"
-            description="Create your first form to start collecting submissions"
             icon={<Files color="#4945ff" width={96} height="auto" />}
-            action={
-              <Button
-                variant="secondary" // color scheme
-                height="3.2rem"
-                startIcon={<Plus color="#271fe0" />}
-                onClick={handleCreateForm}
-              >
-                Create new form
-              </Button>
-            }
+            text="No forms yet"
+            buttonText='Create a new form'
+            action={handleCreateForm}
+            shadow
           />
         </>
       ) : (
@@ -247,40 +251,24 @@ export const FormsListPage = () => {
           {filteredForms.length === 0 ? (
             <>
               <EmptyState
-                title="No forms found"
-                description={`No forms match "${searchValue}"`}
-                action={
-                  <Button variant="secondary" height="3.2rem" onClick={handleSearchClear}>
-                    Clear search
-                  </Button>
-                }
+                text="No forms found"
+                buttonText='Clear search'
+                // description={`No forms match "${searchValue}"`}
+                action={handleSearchClear}
+                // action={
+                //   <Button variant="secondary" height="3.2rem" onClick={handleSearchClear}>
+                //     Clear search
+                //   </Button>
+                // }
               />
             </>
           ) : (
             <Table
               footer={
-                <Flex
-                  gap="12px"
-                  cursor="pointer"
-                  background="primary100"
-                  padding="20px"
-                  onClick={handleCreateForm}
-                >
-                  <Flex
-                    justifyContent="center"
-                    alignItems="center"
-                    width="2.4rem"
-                    height="2.4rem"
-                    background="primary200"
-                    borderRadius="50%"
-                  >
-                    <Plus color="primary600" width="1rem" height="1rem" />
-                  </Flex>
-                  <Typography variant="pi" fontWeight="bold" textColor="#4945ff">
-                    {/* Showing {filteredForms.length} of {forms.length} forms */}
-                    Add another form
-                  </Typography>
-                </Flex>
+                <>
+                  <AddMoreButton text="Create more forms" onClick={handleCreateForm} />
+                  {/* Showing {filteredForms.length} of {forms.length} forms */}
+                </>
               }
             >
               <Thead>
@@ -326,10 +314,10 @@ export const FormsListPage = () => {
                       display="flex"
                       width="100%"
                     >
-                      <TypographyTD text={form.title} />
-                      <TypographyTD text={form.slug} />
-                      <BadgeTD text={`${form.submissionCount}`} badgeVariant="neutral" />
-                      <BadgeTD
+                      <TableTypography text={form.title} />
+                      <TableTypography text={form.slug} />
+                      <TableBadge text={`${form.submissionCount}`} badgeVariant="neutral" />
+                      <TableBadge
                         text={isActive ? 'Active' : 'Inactive'}
                         badgeVariant={isActive ? 'success' : 'danger'}
                       />

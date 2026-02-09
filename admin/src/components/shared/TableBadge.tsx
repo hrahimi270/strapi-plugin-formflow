@@ -1,11 +1,11 @@
 import { Td, Badge, Flex } from '@strapi/design-system';
 
-interface BadgeTDProps {
+interface TableBadgeProps {
   text: string;
   badgeVariant: string;
 }
 
-const BadgeTD = ({ text, badgeVariant }: BadgeTDProps) => {
+const TableBadge = ({ text, badgeVariant }: TableBadgeProps) => {
   return (
     <Td flex="1">
       <Flex width="100%" height="100%" alignItems="center">
@@ -15,4 +15,4 @@ const BadgeTD = ({ text, badgeVariant }: BadgeTDProps) => {
   );
 };
 
-export default BadgeTD;
+export default TableBadge;
