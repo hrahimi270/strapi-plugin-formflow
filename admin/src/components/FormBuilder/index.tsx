@@ -1,12 +1,13 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Box, Flex, Typography, Button, IconButton } from '@strapi/design-system';
-import { Plus, Trash, Pencil, Drag } from '@strapi/icons';
+import { Box, Flex, Typography, IconButton } from '@strapi/design-system';
+import { Trash, Pencil, Drag, Files } from '@strapi/icons';
 import { v4 as uuidv4 } from 'uuid';
 
 import { useFieldTypes } from '../../hooks';
 import { FieldTypeSelector } from './FieldTypeSelector';
 import { FieldEditor } from './FieldEditor';
 import type { FormField } from '../../utils/api';
+import EmptyState from '../shared/EmptyState';
 
 interface FormBuilderProps {
   fields: FormField[];
@@ -179,38 +180,24 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
 
   return (
     <>
-      <Box
-        background="neutral0"
-        hasRadius
-        shadow="tableShadow"
-        borderColor="neutral150"
-        padding={5}
-      >
-        {/* Header */}
-        <Flex justifyContent="space-between" alignItems="center" marginBottom={4}>
-          <Typography variant="delta" fontWeight="bold">
-            Form Fields
-          </Typography>
-          <Button size="S" startIcon={<Plus />} onClick={handleAddFieldClick}>
-            Add Field
-          </Button>
-        </Flex>
-
+      <Flex direction="column" gap="4px" width="100%">
+        <Box width="100%">
+          <Typography variant="primary" fontWeight="bold" fontSize="12px">
+          Fields
+        </Typography>
+        </Box>
         {/* Fields Grid */}
         {sortedFields.length === 0 ? (
-          <Box padding={8} textAlign="center" background="neutral100" hasRadius>
-            <Flex direction="column" gap={2} alignItems="center">
-              <Typography textColor="neutral600" fontWeight="bold">
-                No fields yet
-              </Typography>
-              <Typography textColor="neutral500" variant="pi">
-                Click "Add Field" to start building your form.
-              </Typography>
-            </Flex>
-          </Box>
+          <EmptyState
+            icon={<Files color="#7b79ff" width={96} height="auto" />}
+            text="No fields yet"
+            buttonText="Start building your form"
+            action={handleAddFieldClick}
+            border
+          />
         ) : (
           <>
-            <Flex wrap="wrap" gap={3}>
+            <Flex width="100%" wrap="wrap" gap={3}>
               {sortedFields.map((field, index) => (
                 <Box
                   key={field.id}
@@ -316,7 +303,7 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
             </Box>
           </>
         )}
-      </Box>
+      </Flex>
 
       {/* Field Type Selector Modal */}
       <FieldTypeSelector

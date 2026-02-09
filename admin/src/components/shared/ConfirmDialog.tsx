@@ -19,7 +19,7 @@ interface ConfirmDialogProps {
  * Reusable confirmation dialog component
  * Used for destructive actions like delete operations
  */
-export const ConfirmDialog = ({
+const ConfirmDialog = ({
   isOpen,
   onClose,
   onConfirm,
@@ -76,3 +76,5 @@ export const ConfirmDialog = ({
     </>
   );
 };
+
+export default ConfirmDialog

@@ -1,10 +1,10 @@
 import { Td, Typography, Flex } from '@strapi/design-system';
 
-interface TypographyTDProps {
+interface TableTypographyProps {
   text: string;
 }
 
-const TypographyTD = ({ text }: TypographyTDProps) => {
+const TableTypography = ({ text }: TableTypographyProps) => {
   return (
     <Td flex="1" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
       <Flex width="100%" height="100%" alignItems="center">
@@ -14,4 +14,4 @@ const TypographyTD = ({ text }: TypographyTDProps) => {
   );
 };
 
-export default TypographyTD;
+export default TableTypography;
