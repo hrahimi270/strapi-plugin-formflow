@@ -3,10 +3,10 @@ import { Plus } from '@strapi/icons';
 
 interface AddMoreButtonProps {
   text: string;
-  onClick: () => void;
+  onClick?: () => void;
 }
 
-const AddMoreButton = ({ text, onClick }: AddMoreButtonProps) => {
+const AddMoreButton = ({ text, onClick = () => {} }: AddMoreButtonProps) => {
   return (
     <Flex gap="12px" cursor="pointer" background="primary100" padding="20px" onClick={onClick}>
       <Flex

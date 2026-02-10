@@ -14,6 +14,7 @@ import {
   Searchbar,
   Loader,
   Link,
+  EmptyStateLayout,
 } from '@strapi/design-system';
 import { Plus, Trash, Eye, Duplicate, Files, WarningCircle } from '@strapi/icons';
 import { Page, useNotification } from '@strapi/strapi/admin';
@@ -180,7 +181,7 @@ export const FormsListPage = () => {
         <Box padding={8}>
           <EmptyState
             text="Error loading forms"
-            buttonText='Try again'
+            buttonText="Try again"
             // description={error.message}
             action={() => refetch()}
             // action={
@@ -222,14 +223,29 @@ export const FormsListPage = () => {
       {/* Content Section */}
       {numberOfForms === 0 ? (
         <>
+          <Box width="100%">
+            <EmptyStateLayout
+              action={
+                <Button
+                  onClick={handleCreateForm}
+                  variant="secondary" // color scheme
+                  height="3.2rem"
+                  startIcon={<Plus color="#271fe0" />}
+                >
+                  Create new form
+                </Button>
+              }
+              content="No forms yet"
+              icon={<Files color="#4945ff" width={96} height="auto" />}
+            />
+          </Box>
           {/* Empty State */}
-          <EmptyState
-            icon={<Files color="#4945ff" width={96} height="auto" />}
+          {/* <EmptyState
             text="No forms yet"
-            buttonText='Create a new form'
+            buttonText="Create new form"
             action={handleCreateForm}
             shadow
-          />
+          /> */}
         </>
       ) : (
         <Flex direction="column" gap="16px" alignItems="stretch" width="100%">
@@ -249,24 +265,22 @@ export const FormsListPage = () => {
 
           {/* Forms Table */}
           {filteredForms.length === 0 ? (
-            <>
-              <EmptyState
-                text="No forms found"
-                buttonText='Clear search'
-                // description={`No forms match "${searchValue}"`}
-                action={handleSearchClear}
-                // action={
-                //   <Button variant="secondary" height="3.2rem" onClick={handleSearchClear}>
-                //     Clear search
-                //   </Button>
-                // }
-              />
-            </>
+            <EmptyState
+              text="No forms found"
+              buttonText="Clear search"
+              // description={`No forms match "${searchValue}"`}
+              action={handleSearchClear}
+              // action={
+              //   <Button variant="secondary" height="3.2rem" onClick={handleSearchClear}>
+              //     Clear search
+              //   </Button>
+              // }
+            />
           ) : (
             <Table
               footer={
                 <>
-                  <AddMoreButton text="Create more forms" onClick={handleCreateForm} />
+                  <AddMoreButton text="Add another form" onClick={handleCreateForm} />
                   {/* Showing {filteredForms.length} of {forms.length} forms */}
                 </>
               }
@@ -325,7 +339,7 @@ export const FormsListPage = () => {
                         <Flex gap="4px">
                           {formActions.map((formAction, index) => (
                             <TooltipIconButton
-                              key={index} // or better: key={action.label}
+                              key={index}
                               label={formAction.label}
                               onClick={(event: MouseEvent) => {
                                 event.stopPropagation();

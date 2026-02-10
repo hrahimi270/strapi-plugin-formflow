@@ -32,7 +32,7 @@ const EmptyState = ({
     gap="24px"
     background="white"
     hasRadius
-    shadow={shadow ? '0px 1px 4px rgba(33, 33, 52, 0.1)' : 'none'}
+    shadow={shadow ? 'neutral200' : 'none'}
     borderColor={border ? '#dcdce4' : 'transparent'}
   >
     {icon && icon}

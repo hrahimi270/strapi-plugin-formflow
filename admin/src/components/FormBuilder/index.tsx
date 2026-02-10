@@ -1,13 +1,23 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Box, Flex, Typography, IconButton } from '@strapi/design-system';
-import { Trash, Pencil, Drag, Files } from '@strapi/icons';
+import {
+  Box,
+  Flex,
+  Typography,
+  Modal,
+  Button,
+  Tabs,
+  EmptyStateLayout,
+  Divider,
+} from '@strapi/design-system';
+import { Trash, Pencil, Drag, Files, Plus } from '@strapi/icons';
 import { v4 as uuidv4 } from 'uuid';
-
 import { useFieldTypes } from '../../hooks';
 import { FieldTypeSelector } from './FieldTypeSelector';
 import { FieldEditor } from './FieldEditor';
 import type { FormField } from '../../utils/api';
-import EmptyState from '../shared/EmptyState';
+import AddMoreButton from '../shared/AddMoreButton';
+import TooltipIconButton from '../shared/TooltipIconButton';
+import FieldTypeIcon from '../shared/FieldTypeIcon';
 
 interface FormBuilderProps {
   fields: FormField[];
@@ -77,7 +87,7 @@ const getDefaultLabel = (type: string): string => {
  * Supports drag-and-drop reordering, add, edit, and delete operations
  */
 export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
-  const { fieldTypes, isLoading: isLoadingFieldTypes } = useFieldTypes();
+  const { fieldTypes, isLoading: isLoadingFieldTypes, fieldTypesByCategory } = useFieldTypes();
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -183,129 +193,180 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
       <Flex direction="column" gap="4px" width="100%">
         <Box width="100%">
           <Typography variant="primary" fontWeight="bold" fontSize="12px">
-          Fields
-        </Typography>
+            Fields
+          </Typography>
         </Box>
+
         {/* Fields Grid */}
-        {sortedFields.length === 0 ? (
-          <EmptyState
-            icon={<Files color="#7b79ff" width={96} height="auto" />}
-            text="No fields yet"
-            buttonText="Start building your form"
-            action={handleAddFieldClick}
-            border
-          />
-        ) : (
-          <>
-            <Flex width="100%" wrap="wrap" gap={3}>
-              {sortedFields.map((field, index) => (
-                <Box
-                  key={field.id}
-                  draggable
-                  onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(e, index)}
-                  onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDragOver(e, index)}
-                  onDragEnd={handleDragEnd}
-                  padding={4}
-                  background="neutral100"
-                  borderColor="neutral200"
-                  borderStyle="solid"
-                  borderWidth="1px"
-                  hasRadius
-                  style={{
-                    width: field.width === 'half' ? 'calc(50% - 6px)' : '100%',
-                    opacity: draggedIndex === index ? 0.5 : 1,
-                    transition: 'opacity 0.15s ease-in-out',
-                    cursor: 'grab',
-                  }}
-                >
-                  <Flex justifyContent="space-between" alignItems="flex-start">
-                    <Flex gap={3} alignItems="flex-start" style={{ flex: 1, minWidth: 0 }}>
-                      <Box color="neutral500" style={{ cursor: 'grab', marginTop: '2px' }}>
+        <Box borderColor="neutral200" width="100%" hasRadius overflow="hidden">
+          {sortedFields.length === 0 ? (
+            <>
+              <EmptyStateLayout
+                action={
+                  <Button
+                    onClick={handleAddFieldClick}
+                    variant="secondary" // color scheme
+                    height="3.2rem"
+                    startIcon={<Plus color="#271fe0" />}
+                  >
+                    Add new field
+                  </Button>
+                }
+                content="No fields yet"
+                icon={<Files color="#7b79ff" width={96} height="auto" />}
+              />
+            </>
+          ) : (
+            <>
+              {sortedFields.map((field, index) => {
+                const fieldActions = [
+                  {
+                    label: 'Edit field',
+                    icon: <Pencil />,
+                    handler: () => handleFieldEdit(field.id),
+                  },
+                  {
+                    label: 'Delete field',
+                    icon: <Trash />,
+                    handler: () => handleFieldDelete(field.id),
+                  },
+                ];
+
+                return (
+                  <Flex
+                    key={field.id}
+                    title="Drag/Move field"
+                    draggable
+                    onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(e, index)}
+                    onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDragOver(e, index)}
+                    onDragEnd={handleDragEnd}
+                    // background="#fbfbfb"
+                    background="white"
+                    borderColor={index === sortedFields.length - 1 ? 'transparent' : 'neutral150'}
+                    borderWidth="0px 0px 1px 0px"
+                    justifyContent="space-between"
+                    padding="16px"
+                    cursor="grab"
+                    width={field.width === 'half' ? 'calc(50% - 6px)' : '100%'}
+                    // opacity={draggedIndex === index ? 0.5 : 1}
+                    style={{
+                      opacity: draggedIndex === index ? 0.5 : 1,
+                    }}
+                  >
+                    <Flex gap="8px">
+                      <TooltipIconButton label="Drag/Move field" cursor="move">
                         <Drag />
-                      </Box>
-                      <Box style={{ flex: 1, minWidth: 0 }}>
-                        <Typography fontWeight="bold" ellipsis>
-                          {field.label}
-                        </Typography>
-                        <Flex gap={2} marginTop={1} wrap="wrap">
-                          <Box
-                            padding={1}
-                            paddingLeft={2}
-                            paddingRight={2}
-                            background="primary100"
-                            hasRadius
-                          >
-                            <Typography variant="pi" textColor="primary700">
-                              {field.type}
-                            </Typography>
-                          </Box>
+                      </TooltipIconButton>
+                      <Flex gap="16px">
+                        <FieldTypeIcon index={index} fiedlType={field.type} />
+                        <Flex>
+                          <Typography fontWeight="bold" ellipsis>
+                            {field.label}
+                          </Typography>
                           {field.required && (
-                            <Box
-                              padding={1}
-                              paddingLeft={2}
-                              paddingRight={2}
-                              background="danger100"
-                              hasRadius
+                            <Typography
+                              fontSize="1.4rem"
+                              fontWeight="600"
+                              variant="pi"
+                              textColor="danger600"
                             >
-                              <Typography variant="pi" textColor="danger700">
-                                required
-                              </Typography>
-                            </Box>
-                          )}
-                          <Box
-                            padding={1}
-                            paddingLeft={2}
-                            paddingRight={2}
-                            background="neutral200"
-                            hasRadius
-                          >
-                            <Typography variant="pi" textColor="neutral700">
-                              {field.width === 'half' ? '50%' : '100%'}
+                              *
                             </Typography>
-                          </Box>
+                          )}
                         </Flex>
-                      </Box>
+                      </Flex>
                     </Flex>
-                    <Flex gap={1} style={{ flexShrink: 0 }}>
-                      <IconButton
-                        label="Edit field"
-                        variant="ghost"
-                        withTooltip={false}
-                        onClick={(e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          handleFieldEdit(field.id);
-                        }}
-                      >
-                        <Pencil />
-                      </IconButton>
-                      <IconButton
-                        label="Delete field"
-                        variant="ghost"
-                        withTooltip={false}
-                        onClick={(e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          handleFieldDelete(field.id);
-                        }}
-                      >
-                        <Trash />
-                      </IconButton>
+
+                    <Flex gap="4px">
+                      {fieldActions.map((fieldAction, index) => (
+                        <TooltipIconButton
+                          key={index}
+                          label={fieldAction.label}
+                          onClick={(event: MouseEvent) => {
+                            event.stopPropagation();
+                            fieldAction.handler();
+                          }}
+                        >
+                          {fieldAction.icon}
+                        </TooltipIconButton>
+                      ))}
                     </Flex>
                   </Flex>
-                </Box>
-              ))}
-            </Flex>
+                );
+              })}
 
-            {/* Field count */}
-            <Box marginTop={4} textAlign="center">
-              <Typography textColor="neutral600" variant="pi">
-                {sortedFields.length} field{sortedFields.length !== 1 ? 's' : ''} configured
-              </Typography>
-            </Box>
-          </>
-        )}
+              <Modal.Root>
+                <Modal.Trigger>
+                  <AddMoreButton text="Add another field to this form" />
+                </Modal.Trigger>
+                <Modal.Content>
+                  <Modal.Header>
+                    <Modal.Title>Some Title</Modal.Title>
+                  </Modal.Header>
+                  <Modal.Body>
+                    <Tabs.Root variant="simple" defaultValue={Object.keys(fieldTypesByCategory)[0]}>
+                      <Flex justifyContent="space-between">
+                        <Typography variant="beta" tag="h2">
+                          Select the category
+                        </Typography>
+                        <Tabs.List>
+                          {Object.keys(fieldTypesByCategory).map((category) => (
+                            <Tabs.Trigger value={category}>{category}</Tabs.Trigger>
+                          ))}
+                        </Tabs.List>
+                      </Flex>
+                      <Divider marginBottom="24px" />
+                      {Object.entries(fieldTypesByCategory).map(([category, items]) => (
+                        <Tabs.Content key={category} value={category}>
+                          <Flex gap="12px" wrap="wrap">
+                            {items.map((item) => (
+                              <Flex
+                                borderColor="primary200"
+                                hasRadius
+                                gap="16px"
+                                padding="16px"
+                                variant="secondary"
+                                width="calc(calc(100% - 12px) / 2)"
+                                key={item.type}
+                                // onClick={() => handleItemClick(item)}
+                              >
+                                <FieldTypeIcon fiedlType={item.type} />
+                                <Flex direction="column" flex="1">
+                                  <Typography width="100%" variant="omega" textColor="neutral800">
+                                    {item.label}
+                                  </Typography>
+                                  <Typography width="100%" variant="pi" textColor="neutral600">
+                                    {item.label} Description
+                                  </Typography>
+                                </Flex>
+                              </Flex>
+                            ))}
+                          </Flex>
+                        </Tabs.Content>
+                      ))}
+                    </Tabs.Root>
+                  </Modal.Body>
+                  {/* <Modal.Footer justifyContent="flex-end">
+                    <Modal.Close onClick={handleSelectorClose}>
+                      <Button>Confirm</Button>
+                    </Modal.Close>
+                  </Modal.Footer> */}
+                </Modal.Content>
+              </Modal.Root>
+
+              {/* <AddMoreButton onClick={handleAddFieldClick} text="Add another field to this form" /> */}
+            </>
+          )}
+        </Box>
       </Flex>
 
       {/* Field Type Selector Modal */}
+      {/* <FieldTypeSelector
+        onSelect={handleFieldTypeSelect}
+        fieldTypes={fieldTypes}
+        isLoading={isLoadingFieldTypes}
+      /> */}
+
       <FieldTypeSelector
         isOpen={isSelectorOpen}
         onClose={handleSelectorClose}

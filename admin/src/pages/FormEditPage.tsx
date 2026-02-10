@@ -35,6 +35,9 @@ import BackButton from '../components/shared/BackButton';
 import FormInputField from '../components/shared/FormInputField';
 import FormTextareaField from '../components/shared/FormTextareaField';
 import SidebarItemContainer from '../components/shared/SidebarItemContainer';
+import TooltipIconButton from '../components/shared/TooltipIconButton';
+import { Drag } from '@strapi/icons';
+import { Divider } from '@strapi/design-system';
 
 /**
  * Default form settings used when creating a new form
@@ -265,7 +268,7 @@ export const FormEditPage = () => {
       </Flex>
 
       <Grid.Root gap="16px" width="100%">
-        <Grid.Item s={9} >
+        <Grid.Item s={9}>
           <Tabs.Root defaultValue="builder">
             <Tabs.List>
               <Tabs.Trigger value="builder">Form Builder</Tabs.Trigger>
@@ -398,7 +401,7 @@ export const FormEditPage = () => {
           </SidebarItemContainer>
           <SidebarItemContainer>
             <Typography width="100%" alignItems="start" variant="sigma" textColor="#666687">
-              Entry
+              Form
             </Typography>
             <Button
               width="100%"
