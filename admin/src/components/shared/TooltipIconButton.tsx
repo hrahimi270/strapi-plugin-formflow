@@ -8,19 +8,25 @@ interface TooltipIconButtonProps {
   children: React.ReactNode;
   label: string;
   onClick?: (event: MouseEvent) => void;
+  cursor?: string;
 }
 
-const TooltipIconButton = ({ children, label, onClick }: TooltipIconButtonProps) => {
+const TooltipIconButton = ({
+  children,
+  label,
+  onClick = () => {},
+  cursor = 'pointer',
+}: TooltipIconButtonProps) => {
   return (
     <Tooltip.Provider>
       <Tooltip.Root>
         <Tooltip.Trigger>
-          <IconButton variant="ghost" onClick={onClick} withTooltip={false}>
+          <IconButton variant="ghost" onClick={onClick} withTooltip={false} cursor={cursor}>
             {children}
           </IconButton>
         </Tooltip.Trigger>
         <Tooltip.Portal>
-          <Tooltip.Content sideOffset={5}>
+          <Tooltip.Content sideOffset={8} style={{ zIndex: 1000 }}>
             <Box
               background="neutral900"
               padding="8px"
@@ -28,7 +34,9 @@ const TooltipIconButton = ({ children, label, onClick }: TooltipIconButtonProps)
               fontSize="1.2rem"
               fontWeight={600}
             >
-              <Typography variant="pi" textColor="#fff">{label}</Typography>
+              <Typography variant="pi" textColor="#fff">
+                {label}
+              </Typography>
             </Box>
           </Tooltip.Content>
         </Tooltip.Portal>
