@@ -2,13 +2,14 @@ import { ArrowLeft } from '@strapi/icons';
 import { Link } from '@strapi/design-system';
 
 interface BackButtonProps {
-  handleBack: () => void;
+  action: () => void;
+  displayText?: boolean
 }
 
-const BackButton = ({ handleBack }: BackButtonProps) => {
+const BackButton = ({ action, displayText = true }: BackButtonProps) => {
   return (
-    <Link startIcon={<ArrowLeft />} onClick={handleBack}>
-      Back
+    <Link startIcon={<ArrowLeft />} onClick={action}>
+      {displayText && 'Back'}
     </Link>
   );
 };

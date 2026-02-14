@@ -207,7 +207,7 @@ export const FormsListPage = () => {
       {/* Header Section */}
       <Flex direction="column" width="100%" gap="12px">
         <Box width="100%">
-          <BackButton handleBack={handleBack} />
+          <BackButton action={handleBack} />
         </Box>
         <HeadingContainer>
           <Flex justifyContent="space-between" alignItems="center" width="100%">

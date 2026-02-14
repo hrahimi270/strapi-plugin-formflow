@@ -12,16 +12,17 @@ import {
 import { Trash, Pencil, Drag, Files, Plus } from '@strapi/icons';
 import { v4 as uuidv4 } from 'uuid';
 import { useFieldTypes } from '../../hooks';
-import { FieldTypeSelector } from './FieldTypeSelector';
 import { FieldEditor } from './FieldEditor';
 import type { FormField } from '../../utils/api';
 import AddMoreButton from '../shared/AddMoreButton';
 import TooltipIconButton from '../shared/TooltipIconButton';
-import FieldTypeIcon from '../shared/FieldTypeIcon';
+import FieldIcon from '../shared/FieldIcon';
+import FieldTypeSelectorNew from './FieldTypeSelectorNew';
 
 interface FormBuilderProps {
   fields: FormField[];
   onChange: (fields: FormField[]) => void;
+  name: string;
 }
 
 /**
@@ -86,12 +87,14 @@ const getDefaultLabel = (type: string): string => {
  * Displays fields in a grid layout respecting their width settings
  * Supports drag-and-drop reordering, add, edit, and delete operations
  */
-export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
+export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
   const { fieldTypes, isLoading: isLoadingFieldTypes, fieldTypesByCategory } = useFieldTypes();
-  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [selectedFieldIcon, setSelectedFieldIcon] = useState<React.ReactNode>();
+  const [selectedFieldType, setSelectedFieldType] = useState<string>('');
+  const [currentStep, setCurrentStep] = useState<'selector' | 'editor' | null>(null);
 
   // Get sorted fields by order
   const sortedFields = useMemo(() => {
@@ -103,32 +106,32 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
     return fields.find((f) => f.id === selectedFieldId) || null;
   }, [fields, selectedFieldId]);
 
-  // Handle opening the field type selector
-  const handleAddFieldClick = useCallback(() => {
-    setIsSelectorOpen(true);
-  }, []);
-
-  // Handle closing the field type selector
-  const handleSelectorClose = useCallback(() => {
-    setIsSelectorOpen(false);
-  }, []);
-
   // Handle field type selection - add new field and open editor
   const handleFieldTypeSelect = useCallback(
     (type: string) => {
       const newField = createNewField(type, fields.length);
       onChange([...fields, newField]);
       setSelectedFieldId(newField.id);
-      setIsEditorOpen(true);
+      setSelectedFieldIcon(<FieldIcon fiedlType={newField.type} />);
+      setSelectedFieldType(type);
+      setIsEditing(false);
+      setCurrentStep('editor');
     },
     [fields, onChange]
   );
 
   // Handle field selection for editing
-  const handleFieldEdit = useCallback((fieldId: string) => {
-    setSelectedFieldId(fieldId);
-    setIsEditorOpen(true);
-  }, []);
+  const handleFieldEdit = useCallback(
+    (fieldId: string) => {
+      setSelectedFieldId(fieldId);
+      setIsEditing(true);
+      const field = fields.find((f) => f.id === fieldId);
+      setSelectedFieldType(field?.type || '');
+      setSelectedFieldIcon(<FieldIcon fiedlType={field?.type || ''} />);
+      setCurrentStep('editor');
+    },
+    [fields]
+  );
 
   // Handle field update
   const handleFieldUpdate = useCallback(
@@ -145,16 +148,31 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
       onChange(fields.filter((f) => f.id !== fieldId).map((f, index) => ({ ...f, order: index })));
       if (selectedFieldId === fieldId) {
         setSelectedFieldId(null);
-        setIsEditorOpen(false);
+        setCurrentStep(null);
       }
     },
     [fields, onChange, selectedFieldId]
   );
 
-  // Handle closing the field editor modal
+  // Handle back button - go back to selector
+  const handleBack = useCallback(() => {
+    setCurrentStep('selector');
+  }, []);
+
+  // Handle editor close - clear everything
   const handleEditorClose = useCallback(() => {
-    setIsEditorOpen(false);
+    setIsEditing(false);
     setSelectedFieldId(null);
+    setCurrentStep(null);
+  }, []);
+
+  // Handle selector close
+  const handleSelectorClose = useCallback((open: boolean) => {
+    if (!open) {
+      setCurrentStep(null);
+    } else {
+      setCurrentStep('selector');
+    }
   }, []);
 
   // Drag and drop handlers
@@ -191,11 +209,9 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
   return (
     <>
       <Flex direction="column" gap="4px" width="100%">
-        <Box width="100%">
-          <Typography variant="primary" fontWeight="bold" fontSize="12px">
-            Fields
-          </Typography>
-        </Box>
+        <Typography width="100%" variant="primary" fontWeight="bold" fontSize="12px">
+          Fields
+        </Typography>
 
         {/* Fields Grid */}
         <Box borderColor="neutral200" width="100%" hasRadius overflow="hidden">
@@ -203,14 +219,21 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
             <>
               <EmptyStateLayout
                 action={
-                  <Button
-                    onClick={handleAddFieldClick}
-                    variant="secondary" // color scheme
-                    height="3.2rem"
-                    startIcon={<Plus color="#271fe0" />}
-                  >
-                    Add new field
-                  </Button>
+                  <FieldTypeSelectorNew
+                    name={name}
+                    trigger={
+                      <Button
+                        variant="secondary"
+                        height="3.2rem"
+                        startIcon={<Plus color="#271fe0" />}
+                      >
+                        Add new field
+                      </Button>
+                    }
+                    onSelect={handleFieldTypeSelect}
+                    isOpen={currentStep === 'selector'}
+                    onOpenChange={handleSelectorClose}
+                  />
                 }
                 content="No fields yet"
                 icon={<Files color="#7b79ff" width={96} height="auto" />}
@@ -240,7 +263,6 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
                     onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(e, index)}
                     onDragOver={(e: React.DragEvent<HTMLDivElement>) => handleDragOver(e, index)}
                     onDragEnd={handleDragEnd}
-                    // background="#fbfbfb"
                     background="white"
                     borderColor={index === sortedFields.length - 1 ? 'transparent' : 'neutral150'}
                     borderWidth="0px 0px 1px 0px"
@@ -248,7 +270,6 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
                     padding="16px"
                     cursor="grab"
                     width={field.width === 'half' ? 'calc(50% - 6px)' : '100%'}
-                    // opacity={draggedIndex === index ? 0.5 : 1}
                     style={{
                       opacity: draggedIndex === index ? 0.5 : 1,
                     }}
@@ -258,11 +279,9 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
                         <Drag />
                       </TooltipIconButton>
                       <Flex gap="16px">
-                        <FieldTypeIcon index={index} fiedlType={field.type} />
+                        <FieldIcon index={index} fiedlType={field.type} />
                         <Flex>
-                          <Typography fontWeight="bold" ellipsis>
-                            {field.label}
-                          </Typography>
+                          <Typography fontWeight="bold">{field.label}</Typography>
                           {field.required && (
                             <Typography
                               fontSize="1.4rem"
@@ -295,90 +314,27 @@ export const FormBuilder = ({ fields, onChange }: FormBuilderProps) => {
                 );
               })}
 
-              <Modal.Root>
-                <Modal.Trigger>
-                  <AddMoreButton text="Add another field to this form" />
-                </Modal.Trigger>
-                <Modal.Content>
-                  <Modal.Header>
-                    <Modal.Title>Some Title</Modal.Title>
-                  </Modal.Header>
-                  <Modal.Body>
-                    <Tabs.Root variant="simple" defaultValue={Object.keys(fieldTypesByCategory)[0]}>
-                      <Flex justifyContent="space-between">
-                        <Typography variant="beta" tag="h2">
-                          Select the category
-                        </Typography>
-                        <Tabs.List>
-                          {Object.keys(fieldTypesByCategory).map((category) => (
-                            <Tabs.Trigger value={category}>{category}</Tabs.Trigger>
-                          ))}
-                        </Tabs.List>
-                      </Flex>
-                      <Divider marginBottom="24px" />
-                      {Object.entries(fieldTypesByCategory).map(([category, items]) => (
-                        <Tabs.Content key={category} value={category}>
-                          <Flex gap="12px" wrap="wrap">
-                            {items.map((item) => (
-                              <Flex
-                                borderColor="primary200"
-                                hasRadius
-                                gap="16px"
-                                padding="16px"
-                                variant="secondary"
-                                width="calc(calc(100% - 12px) / 2)"
-                                key={item.type}
-                                // onClick={() => handleItemClick(item)}
-                              >
-                                <FieldTypeIcon fiedlType={item.type} />
-                                <Flex direction="column" flex="1">
-                                  <Typography width="100%" variant="omega" textColor="neutral800">
-                                    {item.label}
-                                  </Typography>
-                                  <Typography width="100%" variant="pi" textColor="neutral600">
-                                    {item.label} Description
-                                  </Typography>
-                                </Flex>
-                              </Flex>
-                            ))}
-                          </Flex>
-                        </Tabs.Content>
-                      ))}
-                    </Tabs.Root>
-                  </Modal.Body>
-                  {/* <Modal.Footer justifyContent="flex-end">
-                    <Modal.Close onClick={handleSelectorClose}>
-                      <Button>Confirm</Button>
-                    </Modal.Close>
-                  </Modal.Footer> */}
-                </Modal.Content>
-              </Modal.Root>
-
-              {/* <AddMoreButton onClick={handleAddFieldClick} text="Add another field to this form" /> */}
+              <FieldTypeSelectorNew
+                name={name}
+                trigger={<AddMoreButton text="Add another field to this form" />}
+                onSelect={handleFieldTypeSelect}
+                isOpen={currentStep === 'selector'}
+                onOpenChange={handleSelectorClose}
+              />
             </>
           )}
         </Box>
       </Flex>
 
-      {/* Field Type Selector Modal */}
-      {/* <FieldTypeSelector
-        onSelect={handleFieldTypeSelect}
-        fieldTypes={fieldTypes}
-        isLoading={isLoadingFieldTypes}
-      /> */}
-
-      <FieldTypeSelector
-        isOpen={isSelectorOpen}
-        onClose={handleSelectorClose}
-        onSelect={handleFieldTypeSelect}
-        fieldTypes={fieldTypes}
-        isLoading={isLoadingFieldTypes}
-      />
-
       {/* Field Editor Modal */}
       <FieldEditor
+        onBack={handleBack}
+        selectedFieldType={selectedFieldType}
+        isEditing={isEditing}
+        name={name}
+        fieldIcon={selectedFieldIcon}
+        isFieldTypeSelected={currentStep === 'editor'}
         field={selectedField}
-        isOpen={isEditorOpen}
         onChange={handleFieldUpdate}
         onClose={handleEditorClose}
       />
