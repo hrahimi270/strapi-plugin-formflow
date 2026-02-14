@@ -27,12 +27,12 @@ import {
   UidField,
 } from '@strapi/icons/symbols';
 
-interface FieldTypeIconProps {
+interface FieldIconProps {
   fiedlType: string;
   index?: number; // For testing purposes
 }
 
-const FieldTypeIcon = ({ fiedlType, index }: FieldTypeIconProps) => {
+const FieldIcon = ({ fiedlType, index }: FieldIconProps) => {
   // console.log(index, fiedlType); // For testing purposes
   const props = {
     width: 32,
@@ -66,4 +66,4 @@ const FieldTypeIcon = ({ fiedlType, index }: FieldTypeIconProps) => {
   return icon;
 };
 
-export default FieldTypeIcon;
+export default FieldIcon;

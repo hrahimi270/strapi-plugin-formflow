@@ -6,9 +6,6 @@ import {
   Typography,
   Button,
   Tabs,
-  Field,
-  TextInput,
-  Textarea,
   Loader,
   Toggle,
   Grid,
@@ -35,9 +32,6 @@ import BackButton from '../components/shared/BackButton';
 import FormInputField from '../components/shared/FormInputField';
 import FormTextareaField from '../components/shared/FormTextareaField';
 import SidebarItemContainer from '../components/shared/SidebarItemContainer';
-import TooltipIconButton from '../components/shared/TooltipIconButton';
-import { Drag } from '@strapi/icons';
-import { Divider } from '@strapi/design-system';
 
 /**
  * Default form settings used when creating a new form
@@ -255,7 +249,7 @@ export const FormEditPage = () => {
       {/* Header */}
       <Flex direction="column" width="100%" gap="12px">
         <Box width="100%">
-          <BackButton handleBack={handleBack} />
+          <BackButton action={handleBack} />
         </Box>
         <HeadingContainer>
           <Heading text={isCreating ? 'Create Form' : 'Edit Form'} textColor="neutral800" />
@@ -314,7 +308,7 @@ export const FormEditPage = () => {
                     </Box>
                   </Flex>
 
-                  {/* Description - Full Width */}
+                  {/* Description row - Full Width */}
                   <Box width="100%">
                     <FormTextareaField
                       hint="Description for your reference"
@@ -332,6 +326,7 @@ export const FormEditPage = () => {
 
                 {/* Form Builder Component */}
                 <FormBuilder
+                  name={formData.title}
                   fields={formData.fields}
                   onChange={(fields) => updateField('fields', fields)}
                 />

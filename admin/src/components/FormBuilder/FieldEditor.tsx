@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   Box,
   Flex,
@@ -18,12 +18,18 @@ import { Plus, Trash } from '@strapi/icons';
 
 import { ValidationRulesEditor } from './ValidationRulesEditor';
 import type { FormField, FieldOption } from '../../utils/api';
+import BackButton from '../../components/shared/BackButton';
 
 export interface FieldEditorProps {
+  selectedFieldType: string;
+  isEditing: boolean;
+  name: string;
+  fieldIcon: React.ReactNode;
+  isFieldTypeSelected: boolean;
   field: FormField | null;
-  isOpen: boolean;
   onChange: (updates: Partial<FormField>) => void;
   onClose: () => void;
+  onBack: () => void;
 }
 
 /**
@@ -57,16 +63,20 @@ const generateFieldName = (label: string): string => {
  * Provides comprehensive form inputs for configuring all field properties
  * including label, name, options (for choice fields), and validation
  */
-export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorProps) => {
+export const FieldEditor = ({
+  selectedFieldType,
+  isEditing,
+  name,
+  fieldIcon,
+  isFieldTypeSelected,
+  field,
+  onChange,
+  onClose,
+  onBack,
+}: FieldEditorProps) => {
   // Determine field type characteristics
-  const hasOptions = useMemo(
-    () => field && CHOICE_FIELD_TYPES.includes(field.type),
-    [field]
-  );
-  const isLayoutField = useMemo(
-    () => field && LAYOUT_FIELD_TYPES.includes(field.type),
-    [field]
-  );
+  const hasOptions = useMemo(() => field && CHOICE_FIELD_TYPES.includes(field.type), [field]);
+  const isLayoutField = useMemo(() => field && LAYOUT_FIELD_TYPES.includes(field.type), [field]);
   const hasDefaultValue = useMemo(
     () => field && DEFAULT_VALUE_FIELD_TYPES.includes(field.type),
     [field]
@@ -133,27 +143,29 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
     [field, onChange]
   );
 
-  // Handle modal open state change
-  const handleOpenChange = (open: boolean) => {
-    if (!open) {
-      onClose();
-    }
-  };
-
   if (!field) return null;
 
   return (
-    <Modal.Root open={isOpen} onOpenChange={handleOpenChange}>
+    <Modal.Root open={isFieldTypeSelected} onOpenChange={onClose}>
       <Modal.Content>
         <Modal.Header>
           <Modal.Title>
-            <Flex gap={3} alignItems="center">
-              <span>Edit Field</span>
-              <Box padding={1} paddingLeft={2} paddingRight={2} background="primary100" hasRadius>
-                <Typography variant="pi" fontWeight="bold" textColor="primary700">
-                  {field.type.toUpperCase()}
-                </Typography>
-              </Box>
+            <Flex gap="12px">
+              {!isEditing && <BackButton action={onBack} displayText={false} />}
+              {fieldIcon}
+              <Typography variant="pi" fontWeight="400">
+                {name}
+              </Typography>
+              {isEditing && (
+                <>
+                  <Typography variant="pi" fontWeight="400" textColor="neutral500">
+                    /
+                  </Typography>
+                  <Typography variant="pi" fontWeight="600">
+                    {selectedFieldType}
+                  </Typography>
+                </>
+              )}
             </Flex>
           </Modal.Title>
         </Modal.Header>
