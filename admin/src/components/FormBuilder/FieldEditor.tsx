@@ -22,10 +22,10 @@ import BackButton from '../../components/shared/BackButton';
 
 export interface FieldEditorProps {
   selectedFieldType: string;
-  isEditing: boolean;
+  // isEditing: boolean;
   name: string;
   fieldIcon: React.ReactNode;
-  isFieldTypeSelected: boolean;
+  isOpen: boolean;
   field: FormField | null;
   onChange: (updates: Partial<FormField>) => void;
   onClose: () => void;
@@ -65,10 +65,10 @@ const generateFieldName = (label: string): string => {
  */
 export const FieldEditor = ({
   selectedFieldType,
-  isEditing,
+  // isEditing,
   name,
   fieldIcon,
-  isFieldTypeSelected,
+  isOpen,
   field,
   onChange,
   onClose,
@@ -146,17 +146,17 @@ export const FieldEditor = ({
   if (!field) return null;
 
   return (
-    <Modal.Root open={isFieldTypeSelected} onOpenChange={onClose}>
+    <Modal.Root open={isOpen} onOpenChange={onClose}>
       <Modal.Content>
         <Modal.Header>
           <Modal.Title>
             <Flex gap="12px">
-              {!isEditing && <BackButton action={onBack} displayText={false} />}
+              {<BackButton action={onBack} displayText={false} />}
               {fieldIcon}
               <Typography variant="pi" fontWeight="400">
                 {name}
               </Typography>
-              {isEditing && (
+              {(
                 <>
                   <Typography variant="pi" fontWeight="400" textColor="neutral500">
                     /

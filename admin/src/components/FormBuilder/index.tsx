@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Box,
   Flex,
@@ -88,13 +88,12 @@ const getDefaultLabel = (type: string): string => {
  * Supports drag-and-drop reordering, add, edit, and delete operations
  */
 export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
-  const { fieldTypes, isLoading: isLoadingFieldTypes, fieldTypesByCategory } = useFieldTypes();
+  // const { fieldTypes, isLoading: isLoadingFieldTypes, fieldTypesByCategory } = useFieldTypes();
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [selectedFieldIcon, setSelectedFieldIcon] = useState<React.ReactNode>();
   const [selectedFieldType, setSelectedFieldType] = useState<string>('');
-  const [currentStep, setCurrentStep] = useState<'selector' | 'editor' | null>(null);
+  const [currentStep, setCurrentStep] = useState<'closed' | 'selector' | 'editor'>('closed');
 
   // Get sorted fields by order
   const sortedFields = useMemo(() => {
@@ -114,7 +113,6 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
       setSelectedFieldId(newField.id);
       setSelectedFieldIcon(<FieldIcon fiedlType={newField.type} />);
       setSelectedFieldType(type);
-      setIsEditing(false);
       setCurrentStep('editor');
     },
     [fields, onChange]
@@ -124,7 +122,6 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
   const handleFieldEdit = useCallback(
     (fieldId: string) => {
       setSelectedFieldId(fieldId);
-      setIsEditing(true);
       const field = fields.find((f) => f.id === fieldId);
       setSelectedFieldType(field?.type || '');
       setSelectedFieldIcon(<FieldIcon fiedlType={field?.type || ''} />);
@@ -138,6 +135,7 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
     (updates: Partial<FormField>) => {
       if (!selectedFieldId) return;
       onChange(fields.map((f) => (f.id === selectedFieldId ? { ...f, ...updates } : f)));
+      setCurrentStep('closed');
     },
     [fields, onChange, selectedFieldId]
   );
@@ -148,7 +146,7 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
       onChange(fields.filter((f) => f.id !== fieldId).map((f, index) => ({ ...f, order: index })));
       if (selectedFieldId === fieldId) {
         setSelectedFieldId(null);
-        setCurrentStep(null);
+        setCurrentStep('closed');
       }
     },
     [fields, onChange, selectedFieldId]
@@ -161,18 +159,20 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
 
   // Handle editor close - clear everything
   const handleEditorClose = useCallback(() => {
-    setIsEditing(false);
     setSelectedFieldId(null);
-    setCurrentStep(null);
+    setCurrentStep('closed');
   }, []);
 
   // Handle selector close
   const handleSelectorClose = useCallback((open: boolean) => {
     if (!open) {
-      setCurrentStep(null);
-    } else {
-      setCurrentStep('selector');
+      setCurrentStep('closed');
     }
+  }, []);
+
+  // When opening the selector, add this before the trigger buttons:
+  const handleOpenSelector = useCallback(() => {
+    setCurrentStep('selector');
   }, []);
 
   // Drag and drop handlers
@@ -223,6 +223,7 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
                     name={name}
                     trigger={
                       <Button
+                        onClick={handleOpenSelector} // Add this
                         variant="secondary"
                         height="3.2rem"
                         startIcon={<Plus color="#271fe0" />}
@@ -330,10 +331,9 @@ export const FormBuilder = ({ fields, onChange, name }: FormBuilderProps) => {
       <FieldEditor
         onBack={handleBack}
         selectedFieldType={selectedFieldType}
-        isEditing={isEditing}
         name={name}
         fieldIcon={selectedFieldIcon}
-        isFieldTypeSelected={currentStep === 'editor'}
+        isOpen={currentStep === 'editor'}
         field={selectedField}
         onChange={handleFieldUpdate}
         onClose={handleEditorClose}
