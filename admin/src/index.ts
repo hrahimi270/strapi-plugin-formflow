@@ -9,8 +9,8 @@ export default {
       to: `plugins/${PLUGIN_ID}`,
       icon: PluginIcon,
       intlLabel: {
-        id: `${PLUGIN_ID}.plugin.name`,
-        defaultMessage: PLUGIN_ID,
+        id: getTranslation('plugin.name'),
+        defaultMessage: 'Forms',
       },
       Component: async () => {
         const { App } = await import('./pages/App');
