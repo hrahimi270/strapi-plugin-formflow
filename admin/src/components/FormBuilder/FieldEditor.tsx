@@ -623,11 +623,17 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
                               </Field.Label>
                               <SingleSelect
                                 value={field.conditional.operator}
-                                onChange={(value: string | number) =>
+                                onChange={(value: string | number) => {
+                                  const operator = value as ConditionalRule['operator'];
+                                  // Valueless operators (is_empty/is_not_empty) don't use a
+                                  // value, so clear any stale value in the same update.
                                   handleUpdateConditional({
-                                    operator: value as ConditionalRule['operator'],
-                                  })
-                                }
+                                    operator,
+                                    ...(VALUELESS_OPERATORS.includes(operator)
+                                      ? { value: undefined }
+                                      : {}),
+                                  });
+                                }}
                               >
                                 {CONDITIONAL_OPERATORS.map((op) => (
                                   <SingleSelectOption key={op} value={op}>
@@ -667,20 +673,15 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
         </Modal.Body>
 
         <Modal.Footer>
+          {/* Edits apply live via onChange, so this is a close-only action. */}
           <Modal.Close>
-            <Button variant="tertiary">
+            <Button>
               {formatMessage({
-                id: getTranslation('common.cancel'),
-                defaultMessage: 'Cancel',
+                id: getTranslation('common.done'),
+                defaultMessage: 'Done',
               })}
             </Button>
           </Modal.Close>
-          <Button onClick={onClose}>
-            {formatMessage({
-              id: getTranslation('common.save'),
-              defaultMessage: 'Done',
-            })}
-          </Button>
         </Modal.Footer>
       </Modal.Content>
     </Modal.Root>

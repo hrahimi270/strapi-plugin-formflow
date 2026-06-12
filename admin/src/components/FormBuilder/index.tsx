@@ -92,6 +92,23 @@ const getDefaultLabel = (type: string): string => {
 };
 
 /**
+ * Ensures `name` is unique among `existingNames`. If it collides, appends an
+ * incrementing numeric suffix (`name_2`, `name_3`, ...) until unique. The field
+ * `name` is the submission-data key, so duplicates would silently overwrite
+ * each other's submitted values.
+ */
+const makeUniqueName = (name: string, existingNames: string[]): string => {
+  if (!existingNames.includes(name)) return name;
+  let suffix = 2;
+  let candidate = `${name}_${suffix}`;
+  while (existingNames.includes(candidate)) {
+    suffix += 1;
+    candidate = `${name}_${suffix}`;
+  }
+  return candidate;
+};
+
+/**
  * Draggable field card with a visible drop indicator. Uses styled-components so
  * the drag affordance / drop-target highlight actually render (design-system
  * Box cannot express `:hover`/cursor for these states).
@@ -155,6 +172,10 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
   const handleFieldTypeSelect = useCallback(
     (type: string) => {
       const newField = createNewField(type, fields.length);
+      newField.name = makeUniqueName(
+        newField.name,
+        fields.map((f) => f.name)
+      );
       onChange([...fields, newField]);
       setSelectedFieldId(newField.id);
       setIsEditorOpen(true);
@@ -170,7 +191,19 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
   const handleFieldUpdate = useCallback(
     (updates: Partial<FormField>) => {
       if (!selectedFieldId) return;
-      onChange(fields.map((f) => (f.id === selectedFieldId ? { ...f, ...updates } : f)));
+      // The field `name` is the submission-data key and must stay unique. If a
+      // rename collides with another field's name, append a numeric suffix.
+      const nextUpdates =
+        updates.name !== undefined
+          ? {
+              ...updates,
+              name: makeUniqueName(
+                updates.name,
+                fields.filter((f) => f.id !== selectedFieldId).map((f) => f.name)
+              ),
+            }
+          : updates;
+      onChange(fields.map((f) => (f.id === selectedFieldId ? { ...f, ...nextUpdates } : f)));
     },
     [fields, onChange, selectedFieldId]
   );
@@ -182,7 +215,10 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
       const copy: FormField = {
         ...original,
         id: uuidv4(),
-        name: `${original.name}_copy`,
+        name: makeUniqueName(
+          `${original.name}_copy`,
+          fields.map((f) => f.name)
+        ),
         label: `${original.label} (copy)`,
         order: fields.length,
         conditional: original.conditional ? { ...original.conditional } : undefined,
@@ -198,13 +234,14 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
       onChange(
         fields.filter((f) => f.id !== fieldId).map((f, index) => ({ ...f, order: index }))
       );
-      // Also unassign the field from any multi-step step.
+      // Also unassign the field from any multi-step step. Step membership is
+      // keyed by the stable field id (not the mutable name).
       if (target && steps.length > 0) {
         onSettingsChange({
           ...settings,
           steps: steps.map((s) => ({
             ...s,
-            fields: s.fields.filter((n) => n !== target.name),
+            fields: s.fields.filter((id) => id !== target.id),
           })),
         });
       }
@@ -289,15 +326,15 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
   );
 
   const handleAssignFieldToStep = useCallback(
-    (fieldName: string, stepId: string | null) => {
+    (fieldId: string, stepId: string | null) => {
       const nextSteps = steps.map((s) => ({
         ...s,
-        // remove the field from every step first
-        fields: s.fields.filter((n) => n !== fieldName),
+        // remove the field from every step first (keyed by stable field id)
+        fields: s.fields.filter((id) => id !== fieldId),
       }));
       if (stepId) {
         const target = nextSteps.find((s) => s.id === stepId);
-        if (target) target.fields = [...target.fields, fieldName];
+        if (target) target.fields = [...target.fields, fieldId];
       }
       onSettingsChange({ ...settings, steps: nextSteps });
     },
@@ -305,8 +342,8 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
   );
 
   const stepIdForField = useCallback(
-    (fieldName: string): string => {
-      const step = steps.find((s) => s.fields.includes(fieldName));
+    (fieldId: string): string => {
+      const step = steps.find((s) => s.fields.includes(fieldId));
       return step ? step.id : '';
     },
     [steps]
@@ -557,9 +594,9 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
                             })}
                           </Field.Label>
                           <SingleSelect
-                            value={stepIdForField(field.name)}
+                            value={stepIdForField(field.id)}
                             onChange={(value: string | number) =>
-                              handleAssignFieldToStep(field.name, value ? String(value) : null)
+                              handleAssignFieldToStep(field.id, value ? String(value) : null)
                             }
                           >
                             <SingleSelectOption value="">
