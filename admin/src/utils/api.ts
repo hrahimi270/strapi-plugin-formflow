@@ -82,23 +82,43 @@ export interface RawRequestResult {
 }
 
 /**
+ * Attempt to extract a human-readable error message from a Strapi error
+ * response body. Strapi serializes errors as `{ error: { message } }`; fall
+ * back to the raw text (or undefined) when the body is not JSON.
+ */
+const extractErrorMessage = (text: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: string }; message?: string };
+    return parsed?.error?.message || parsed?.message || undefined;
+  } catch {
+    return text.trim() || undefined;
+  }
+};
+
+/**
  * Perform an authenticated request using the native `fetch` API and return the
  * raw response body as text. This intentionally bypasses `useFetchClient` for
  * the two cases it cannot handle:
  *  - downloading a `text/csv` (or raw JSON) export without JSON-parsing it
  *  - sending a `DELETE` with a JSON body (batch delete)
+ *
+ * Throws a descriptive `Error` when the admin token cannot be resolved (so the
+ * request is never sent unauthenticated) and on any non-ok response, surfacing
+ * the server's error message when the body can be parsed.
  */
 export const rawRequest = async (
   url: string,
   options: RawRequestOptions
 ): Promise<RawRequestResult> => {
   const token = getAdminToken();
+  if (!token) {
+    throw new Error('Not authenticated: missing admin session token');
+  }
+
   const headers: Record<string, string> = {
     Accept: options.accept ?? 'application/json',
+    Authorization: `Bearer ${token}`,
   };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
 
   const init: RequestInit = {
     method: options.method,
@@ -113,6 +133,13 @@ export const rawRequest = async (
 
   const response = await fetch(withBackendUrl(url), init);
   const text = await response.text();
+
+  if (!response.ok) {
+    const serverMessage = extractErrorMessage(text);
+    throw new Error(
+      serverMessage || `Request failed with status ${response.status}`
+    );
+  }
 
   return { ok: response.ok, status: response.status, text };
 };

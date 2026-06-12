@@ -20,6 +20,7 @@ import { useIntl } from 'react-intl';
 
 import { getTranslation } from '../utils/getTranslation';
 import { useForm } from '../hooks';
+import type { FormApiError } from '../hooks/useForm';
 import { FormBuilder } from '../components/FormBuilder';
 import { FormSettings } from '../components/FormSettings';
 import { EmailSettings } from '../components/FormSettings/EmailSettings';
@@ -93,11 +94,59 @@ const generateSlug = (title: string): string => {
 };
 
 /**
- * Maps a server error message onto specific form fields where the message
- * references a known field, falling back to no field mapping.
+ * The set of form fields that can carry a server validation error.
  */
-const mapServerErrorToFields = (message: string): FieldErrors => {
+const MAPPABLE_FIELDS: Array<keyof FieldErrors> = ['title', 'slug'];
+
+/**
+ * Coerce a server-provided detail value (which may be a string, an array of
+ * messages, or a nested object) into a single human-readable message string.
+ */
+const detailToMessage = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((item) =>
+        typeof item === 'string'
+          ? item
+          : typeof (item as { message?: unknown })?.message === 'string'
+            ? (item as { message: string }).message
+            : undefined
+      )
+      .filter((m): m is string => Boolean(m));
+    return messages.length > 0 ? messages.join(', ') : undefined;
+  }
+  if (value && typeof value === 'object' && typeof (value as { message?: unknown }).message === 'string') {
+    return (value as { message: string }).message;
+  }
+  return undefined;
+};
+
+/**
+ * Maps a server error onto specific form fields. Prefers the structured
+ * `details` payload (a record of `field -> message(s)`) when present, then
+ * falls back to scanning the error message for a known field reference.
+ */
+const mapServerErrorToFields = (
+  message: string,
+  details?: Record<string, unknown>
+): FieldErrors => {
   const errors: FieldErrors = {};
+
+  if (details) {
+    for (const field of MAPPABLE_FIELDS) {
+      const detailMessage = detailToMessage(details[field]);
+      if (detailMessage) {
+        errors[field] = detailMessage;
+      }
+    }
+    if (Object.keys(errors).length > 0) {
+      return errors;
+    }
+  }
+
   const lower = message.toLowerCase();
   if (lower.includes('slug')) {
     errors.slug = message;
@@ -179,6 +228,25 @@ export const FormEditPage = () => {
       currentLocation.pathname !== nextLocation.pathname
   );
 
+  // `useBlocker` only guards in-app navigation; it cannot intercept a tab close
+  // or full-page refresh. Warn via the native `beforeunload` prompt while there
+  // are unsaved changes (and we are not in the middle of a save redirect).
+  useEffect(() => {
+    if (!hasChanges) {
+      return undefined;
+    }
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isSaveNavigatingRef.current) {
+        return;
+      }
+      event.preventDefault();
+      // Legacy browsers require `returnValue` to be set to trigger the prompt.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasChanges]);
+
   // Save handler
   const handleSave = useCallback(async () => {
     const nextErrors: FieldErrors = {};
@@ -238,12 +306,27 @@ export const FormEditPage = () => {
         setHasChanges(false);
       }
     } catch (err) {
+      const apiErr = err as FormApiError;
       const message = err instanceof Error ? err.message : '';
-      // Surface server validation onto fields where possible.
-      const mapped = mapServerErrorToFields(message);
-      if (Object.keys(mapped).length > 0) {
+      const details = apiErr?.details;
+      const isValidationError = Boolean(details) || apiErr?.status === 400;
+
+      // Surface server validation onto fields where possible. For validation
+      // errors, prefer the structured `details` so field-level messages land on
+      // the right inputs; only fall back to a toast when nothing could be mapped.
+      const mapped: FieldErrors = isValidationError
+        ? mapServerErrorToFields(message, details)
+        : {};
+      const mappedAnyField = Object.keys(mapped).length > 0;
+      if (mappedAnyField) {
         setFieldErrors(mapped);
       }
+
+      if (isValidationError && mappedAnyField) {
+        // Field-level errors are already shown inline; skip the toast.
+        return;
+      }
+
       toggleNotification({
         type: 'danger',
         message:
@@ -304,8 +387,8 @@ export const FormEditPage = () => {
         <Tabs.Root defaultValue="builder">
           <Tabs.List
             aria-label={formatMessage({
-              id: getTranslation('form.tabs.builder'),
-              defaultMessage: 'Form Builder',
+              id: getTranslation('form.tabs.ariaLabel'),
+              defaultMessage: 'Form configuration tabs',
             })}
           >
             <Tabs.Trigger value="builder">
