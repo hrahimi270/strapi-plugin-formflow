@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import * as React from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useNavigate, useBlocker } from 'react-router-dom';
 import {
-  Main,
   Box,
   Flex,
   Typography,
@@ -10,13 +10,15 @@ import {
   Field,
   TextInput,
   Textarea,
-  Checkbox,
-  Loader,
-  Link,
+  Toggle,
+  Grid,
+  Dialog,
 } from '@strapi/design-system';
-import { ArrowLeft, Check } from '@strapi/icons';
-import { Page, useNotification } from '@strapi/strapi/admin';
+import { Check, WarningCircle } from '@strapi/icons';
+import { Page, Layouts, BackButton, ConfirmDialog, useNotification } from '@strapi/strapi/admin';
+import { useIntl } from 'react-intl';
 
+import { getTranslation } from '../utils/getTranslation';
 import { useForm } from '../hooks';
 import { FormBuilder } from '../components/FormBuilder';
 import { FormSettings } from '../components/FormSettings';
@@ -62,6 +64,11 @@ interface FormData {
 }
 
 /**
+ * Field-level validation errors keyed by field name.
+ */
+type FieldErrors = Partial<Record<'title' | 'slug', string>>;
+
+/**
  * Default empty form data for creating new forms
  */
 const getEmptyFormData = (): FormData => ({
@@ -86,24 +93,48 @@ const generateSlug = (title: string): string => {
 };
 
 /**
- * Form Edit Page - Used for creating new forms and editing existing ones
- * Features tabbed interface for Form Builder, Settings, and Notifications
+ * Maps a server error message onto specific form fields where the message
+ * references a known field, falling back to no field mapping.
+ */
+const mapServerErrorToFields = (message: string): FieldErrors => {
+  const errors: FieldErrors = {};
+  const lower = message.toLowerCase();
+  if (lower.includes('slug')) {
+    errors.slug = message;
+  } else if (lower.includes('title')) {
+    errors.title = message;
+  }
+  return errors;
+};
+
+/**
+ * Form Edit Page - used for creating new forms and editing existing ones.
+ * Uses the native Strapi page scaffold (Page.Main + Layouts.Header/Content) and
+ * a tabbed Builder / Settings / Notifications interface.
  */
 export const FormEditPage = () => {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
+  const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
 
-  // Determine if we're creating or editing
   const isCreating = !id;
   const documentId = isCreating ? undefined : id;
 
-  // Use the form hook for data fetching and mutations
   const { form, isLoading, isSaving, error, createForm, updateForm } = useForm(documentId);
 
-  // Local form state
   const [formData, setFormData] = useState<FormData>(getEmptyFormData());
   const [hasChanges, setHasChanges] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  // Set while programmatically navigating after a successful save so the
+  // unsaved-changes blocker does not fire on our own redirect.
+  const isSaveNavigatingRef = React.useRef(false);
+
+  // Once the route param settles (e.g. after a create redirect), re-arm the
+  // unsaved-changes blocker for subsequent edits.
+  useEffect(() => {
+    isSaveNavigatingRef.current = false;
+  }, [id]);
 
   // Load form data when editing an existing form
   useEffect(() => {
@@ -132,6 +163,7 @@ export const FormEditPage = () => {
   const handleTitleChange = useCallback(
     (value: string) => {
       updateField('title', value);
+      setFieldErrors((prev) => ({ ...prev, title: undefined }));
       if (isCreating) {
         updateField('slug', generateSlug(value));
       }
@@ -139,20 +171,36 @@ export const FormEditPage = () => {
     [isCreating, updateField]
   );
 
-  // Navigation handlers
-  const handleBack = useCallback(() => {
-    navigate(`/plugins/${PLUGIN_ID}`);
-  }, [navigate]);
+  // ----- Unsaved-changes guard (react-router useBlocker) -----
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hasChanges &&
+      !isSaveNavigatingRef.current &&
+      currentLocation.pathname !== nextLocation.pathname
+  );
 
   // Save handler
   const handleSave = useCallback(async () => {
+    const nextErrors: FieldErrors = {};
     if (!formData.title.trim()) {
+      nextErrors.title = formatMessage({
+        id: getTranslation('form.validation.titleRequired'),
+        defaultMessage: 'Please enter a form title',
+      });
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
       toggleNotification({
         type: 'warning',
-        message: 'Please enter a form title',
+        message: formatMessage({
+          id: getTranslation('form.validation.titleRequired'),
+          defaultMessage: 'Please enter a form title',
+        }),
       });
       return;
     }
+
+    setFieldErrors({});
 
     try {
       const payload: FormPayload = {
@@ -170,190 +218,265 @@ export const FormEditPage = () => {
         const newForm = await createForm(payload);
         toggleNotification({
           type: 'success',
-          message: 'Form created successfully',
+          message: formatMessage({
+            id: getTranslation('form.create.success'),
+            defaultMessage: 'Form created successfully',
+          }),
         });
-        // Navigate to edit the newly created form
+        setHasChanges(false);
+        isSaveNavigatingRef.current = true;
         navigate(`/plugins/${PLUGIN_ID}/forms/${newForm.documentId}/edit`);
       } else {
         await updateForm(payload);
         toggleNotification({
           type: 'success',
-          message: 'Form saved successfully',
+          message: formatMessage({
+            id: getTranslation('form.save.success'),
+            defaultMessage: 'Form saved successfully',
+          }),
         });
         setHasChanges(false);
       }
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      // Surface server validation onto fields where possible.
+      const mapped = mapServerErrorToFields(message);
+      if (Object.keys(mapped).length > 0) {
+        setFieldErrors(mapped);
+      }
       toggleNotification({
         type: 'danger',
-        message: isCreating ? 'Failed to create form' : 'Failed to save form',
+        message:
+          message ||
+          formatMessage({
+            id: getTranslation(isCreating ? 'form.create.error' : 'form.save.error'),
+            defaultMessage: isCreating ? 'Failed to create form' : 'Failed to save form',
+          }),
       });
     }
-  }, [formData, isCreating, createForm, updateForm, toggleNotification, navigate]);
+  }, [formData, isCreating, createForm, updateForm, toggleNotification, navigate, formatMessage]);
 
-  // Loading state
+  const tabTitle = useMemo(
+    () =>
+      formatMessage({
+        id: getTranslation(isCreating ? 'form.create.title' : 'form.edit.title'),
+        defaultMessage: isCreating ? 'Create Form' : 'Edit Form',
+      }),
+    [isCreating, formatMessage]
+  );
+
+  // Loading & error states (native)
   if (isLoading && !isCreating) {
-    return (
-      <Page.Main>
-        <Page.Title>{isCreating ? 'Create Form' : 'Edit Form'}</Page.Title>
-        <Flex justifyContent="center" alignItems="center" height="400px">
-          <Loader>Loading form...</Loader>
-        </Flex>
-      </Page.Main>
-    );
+    return <Page.Loading />;
   }
 
-  // Error state
   if (error && !isCreating) {
-    return (
-      <Page.Main>
-        <Page.Title>Error</Page.Title>
-        <Box padding={8}>
-          <Flex direction="column" alignItems="center" gap={4}>
-            <Typography textColor="danger600">{error.message}</Typography>
-            <Button onClick={handleBack} variant="secondary">
-              Back to Forms
-            </Button>
-          </Flex>
-        </Box>
-      </Page.Main>
-    );
+    return <Page.Error />;
   }
 
   return (
-    <Main>
-      <Page.Title>{isCreating ? 'Create Form' : 'Edit Form'}</Page.Title>
+    <Page.Main>
+      <Page.Title>{tabTitle}</Page.Title>
 
-      {/* Header */}
-      <Box padding={8} background="neutral100">
-        <Flex justifyContent="space-between" alignItems="center">
-          <Flex gap={4} alignItems="center">
-            <Link startIcon={<ArrowLeft />} onClick={handleBack} tag="button">
-              Back
-            </Link>
-            <Box>
-              <Typography variant="alpha" fontWeight="bold">
-                {isCreating ? 'Create Form' : 'Edit Form'}
-              </Typography>
-              <Typography variant="epsilon" textColor="neutral600">
-                {isCreating
-                  ? 'Build a new form with custom fields'
-                  : 'Modify your form configuration'}
-              </Typography>
-            </Box>
-          </Flex>
-          <Flex gap={2} alignItems="center">
-            {/* Active/Inactive Toggle */}
-            <Box paddingRight={4}>
-              <Checkbox
-                checked={formData.isActive}
-                onCheckedChange={(checked: boolean) => updateField('isActive', checked)}
-              >
-                <Typography textColor={formData.isActive ? 'success600' : 'neutral600'}>
-                  {formData.isActive ? 'Active' : 'Inactive'}
-                </Typography>
-              </Checkbox>
-            </Box>
+      <Layouts.Header
+        title={tabTitle}
+        subtitle={formatMessage({
+          id: getTranslation(isCreating ? 'form.create.subtitle' : 'form.edit.subtitle'),
+          defaultMessage: isCreating
+            ? 'Build a new form with custom fields'
+            : 'Modify your form configuration',
+        })}
+        navigationAction={<BackButton disabled={false} fallback={`/plugins/${PLUGIN_ID}`} />}
+        primaryAction={
+          <Button
+            type="submit"
+            startIcon={<Check />}
+            onClick={handleSave}
+            loading={isSaving}
+            disabled={isSaving || (!hasChanges && !isCreating)}
+          >
+            {formatMessage({ id: getTranslation('common.save'), defaultMessage: 'Save' })}
+          </Button>
+        }
+      />
 
-            <Button variant="secondary" onClick={handleBack}>
-              Cancel
-            </Button>
-            <Button
-              startIcon={<Check />}
-              onClick={handleSave}
-              loading={isSaving}
-              disabled={isSaving || (!hasChanges && !isCreating)}
-            >
-              {isCreating ? 'Create' : 'Save'}
-            </Button>
-          </Flex>
-        </Flex>
-      </Box>
-
-      {/* Content with Tabs */}
-      <Box padding={8}>
+      <Layouts.Content>
         <Tabs.Root defaultValue="builder">
-          <Tabs.List>
-            <Tabs.Trigger value="builder">Form Builder</Tabs.Trigger>
-            <Tabs.Trigger value="settings">Settings</Tabs.Trigger>
-            <Tabs.Trigger value="notifications">Notifications</Tabs.Trigger>
+          <Tabs.List
+            aria-label={formatMessage({
+              id: getTranslation('form.tabs.builder'),
+              defaultMessage: 'Form Builder',
+            })}
+          >
+            <Tabs.Trigger value="builder">
+              {formatMessage({
+                id: getTranslation('form.tabs.builder'),
+                defaultMessage: 'Form Builder',
+              })}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="settings">
+              {formatMessage({
+                id: getTranslation('form.tabs.settings'),
+                defaultMessage: 'Settings',
+              })}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="notifications">
+              {formatMessage({
+                id: getTranslation('form.tabs.notifications'),
+                defaultMessage: 'Notifications',
+              })}
+            </Tabs.Trigger>
           </Tabs.List>
 
           <Box marginTop={6}>
             {/* Form Builder Tab */}
             <Tabs.Content value="builder">
-              {/* Basic Info Fields */}
               <Box
                 marginBottom={6}
                 padding={6}
                 background="neutral0"
                 hasRadius
                 shadow="tableShadow"
-                borderColor="neutral150"
               >
-                <Box marginBottom={5}>
+                <Flex justifyContent="space-between" alignItems="flex-start" marginBottom={5}>
                   <Typography variant="delta" fontWeight="bold">
-                    Basic Information
+                    {formatMessage({
+                      id: getTranslation('form.basicInfo.title'),
+                      defaultMessage: 'Basic Information',
+                    })}
                   </Typography>
-                </Box>
+                  <Field.Root name="isActive">
+                    <Flex direction="column" gap={1} alignItems="flex-start">
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('common.active'),
+                          defaultMessage: 'Active',
+                        })}
+                      </Field.Label>
+                      <Toggle
+                        onLabel={formatMessage({
+                          id: getTranslation('common.active'),
+                          defaultMessage: 'Active',
+                        })}
+                        offLabel={formatMessage({
+                          id: getTranslation('common.inactive'),
+                          defaultMessage: 'Inactive',
+                        })}
+                        checked={formData.isActive}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          updateField('isActive', e.target.checked)
+                        }
+                      />
+                    </Flex>
+                  </Field.Root>
+                </Flex>
 
-                <Flex direction="column" gap={5} width="100%">
-                  {/* Title and Slug Row */}
-                  <Flex gap={6} width="100%">
-                    <Box flex="1">
-                      <Field.Root name="title" required>
-                        <Field.Label>Form Title</Field.Label>
-                        <TextInput
-                          value={formData.title}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            handleTitleChange(e.target.value)
-                          }
-                          placeholder="Contact Form"
-                        />
-                        <Field.Hint>A descriptive name for your form</Field.Hint>
-                      </Field.Root>
-                    </Box>
+                <Grid.Root gridCols={12} gap={5}>
+                  <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
+                    <Field.Root
+                      name="title"
+                      required
+                      error={fieldErrors.title || false}
+                      hint={formatMessage({
+                        id: getTranslation('form.basicInfo.formTitle.hint'),
+                        defaultMessage: 'A descriptive name for your form',
+                      })}
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('form.basicInfo.formTitle.label'),
+                          defaultMessage: 'Form Title',
+                        })}
+                      </Field.Label>
+                      <TextInput
+                        value={formData.title}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          handleTitleChange(e.target.value)
+                        }
+                        placeholder={formatMessage({
+                          id: getTranslation('form.basicInfo.formTitle.placeholder'),
+                          defaultMessage: 'Contact Form',
+                        })}
+                      />
+                      <Field.Hint />
+                      <Field.Error />
+                    </Field.Root>
+                  </Grid.Item>
 
-                    <Box flex="1">
-                      <Field.Root name="slug" required>
-                        <Field.Label>Slug</Field.Label>
-                        <TextInput
-                          value={formData.slug}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            updateField('slug', e.target.value)
-                          }
-                          placeholder="contact-form"
-                          disabled={!isCreating}
-                        />
-                        <Field.Hint>
-                          {isCreating
-                            ? 'URL-friendly identifier (auto-generated from title)'
-                            : 'Cannot be changed after creation'}
-                        </Field.Hint>
-                      </Field.Root>
-                    </Box>
-                  </Flex>
+                  <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
+                    <Field.Root
+                      name="slug"
+                      required
+                      error={fieldErrors.slug || false}
+                      hint={formatMessage({
+                        id: getTranslation(
+                          isCreating
+                            ? 'form.basicInfo.slug.hint.create'
+                            : 'form.basicInfo.slug.hint.edit'
+                        ),
+                        defaultMessage: isCreating
+                          ? 'URL-friendly identifier (auto-generated from title)'
+                          : 'Cannot be changed after creation',
+                      })}
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('form.basicInfo.slug.label'),
+                          defaultMessage: 'Slug',
+                        })}
+                      </Field.Label>
+                      <TextInput
+                        value={formData.slug}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          updateField('slug', e.target.value);
+                          setFieldErrors((prev) => ({ ...prev, slug: undefined }));
+                        }}
+                        placeholder={formatMessage({
+                          id: getTranslation('form.basicInfo.slug.placeholder'),
+                          defaultMessage: 'contact-form',
+                        })}
+                        disabled={!isCreating}
+                      />
+                      <Field.Hint />
+                      <Field.Error />
+                    </Field.Root>
+                  </Grid.Item>
 
-                  {/* Description - Full Width */}
-                  <Box width="100%">
-                    <Field.Root name="description">
-                      <Field.Label>Description (Optional)</Field.Label>
+                  <Grid.Item col={12} direction="column" alignItems="stretch">
+                    <Field.Root
+                      name="description"
+                      hint={formatMessage({
+                        id: getTranslation('form.basicInfo.description.hint'),
+                        defaultMessage: 'Internal description for your reference',
+                      })}
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('form.basicInfo.description.label'),
+                          defaultMessage: 'Description (Optional)',
+                        })}
+                      </Field.Label>
                       <Textarea
                         value={formData.description}
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                           updateField('description', e.target.value)
                         }
-                        placeholder="A brief description of what this form is for..."
+                        placeholder={formatMessage({
+                          id: getTranslation('form.basicInfo.description.placeholder'),
+                          defaultMessage: 'A brief description of what this form is for...',
+                        })}
                       />
-                      <Field.Hint>Internal description for your reference</Field.Hint>
+                      <Field.Hint />
                     </Field.Root>
-                  </Box>
-                </Flex>
+                  </Grid.Item>
+                </Grid.Root>
               </Box>
 
-              {/* Form Builder Component */}
               <FormBuilder
                 fields={formData.fields}
                 onChange={(fields) => updateField('fields', fields)}
+                settings={formData.settings}
+                onSettingsChange={(settings) => updateField('settings', settings)}
               />
             </Tabs.Content>
 
@@ -375,15 +498,8 @@ export const FormEditPage = () => {
 
             {/* Notifications Tab */}
             <Tabs.Content value="notifications">
-              <Flex direction="column" gap={6}>
-                {/* Email Notifications */}
-                <Box
-                  padding={6}
-                  background="neutral0"
-                  hasRadius
-                  shadow="tableShadow"
-                  borderColor="neutral150"
-                >
+              <Flex direction="column" gap={6} alignItems="stretch">
+                <Box padding={6} background="neutral0" hasRadius shadow="tableShadow">
                   <EmailSettings
                     notifications={formData.settings.emailNotifications || []}
                     onChange={(emailNotifications: EmailNotification[]) =>
@@ -392,14 +508,7 @@ export const FormEditPage = () => {
                   />
                 </Box>
 
-                {/* Webhooks */}
-                <Box
-                  padding={6}
-                  background="neutral0"
-                  hasRadius
-                  shadow="tableShadow"
-                  borderColor="neutral150"
-                >
+                <Box padding={6} background="neutral0" hasRadius shadow="tableShadow">
                   <WebhookSettings
                     webhooks={formData.settings.webhooks || []}
                     onChange={(webhooks: WebhookConfig[]) =>
@@ -411,7 +520,41 @@ export const FormEditPage = () => {
             </Tabs.Content>
           </Box>
         </Tabs.Root>
-      </Box>
-    </Main>
+      </Layouts.Content>
+
+      {/* Unsaved-changes confirmation dialog */}
+      <Dialog.Root
+        open={blocker.state === 'blocked'}
+        onOpenChange={(open: boolean) => {
+          if (!open && blocker.state === 'blocked') {
+            blocker.reset();
+          }
+        }}
+      >
+        <ConfirmDialog
+          variant="danger"
+          icon={<WarningCircle />}
+          title={formatMessage({
+            id: getTranslation('form.unsaved.title'),
+            defaultMessage: 'Unsaved changes',
+          })}
+          onConfirm={() => {
+            if (blocker.state === 'blocked') {
+              blocker.proceed();
+            }
+          }}
+          onCancel={() => {
+            if (blocker.state === 'blocked') {
+              blocker.reset();
+            }
+          }}
+        >
+          {formatMessage({
+            id: getTranslation('form.unsaved.body'),
+            defaultMessage: 'You have unsaved changes. Are you sure you want to leave this page?',
+          })}
+        </ConfirmDialog>
+      </Dialog.Root>
+    </Page.Main>
   );
 };
