@@ -173,6 +173,18 @@ const SubmissionsView = ({
     setPage(page);
   }, [page, setPage]);
 
+  // Guard against an out-of-range page: increasing the page size (or a direct
+  // URL edit) can leave `page` beyond the available `pageCount`, which would
+  // request an empty page. Clamp the URL back to the last valid page so the
+  // view always shows data. Only act once a real page count is known and there
+  // is at least one page of results.
+  useEffect(() => {
+    const pageCount = pagination?.pageCount;
+    if (pageCount && pageCount >= 1 && page > pageCount) {
+      setQuery({ page: String(pageCount) });
+    }
+  }, [page, pagination?.pageCount, setQuery]);
+
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 

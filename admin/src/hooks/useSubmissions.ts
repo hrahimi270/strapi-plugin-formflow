@@ -170,15 +170,17 @@ export const useSubmissions = (
   );
 
   /**
-   * Recompute pagination after `removed` rows are deleted, and—when the current
-   * page has been emptied and is not the first page—step back one page so the
-   * user is not left staring at an empty list.
+   * Recompute pagination counts after `removed` rows are deleted.
    *
-   * @param removed         Number of rows that were deleted.
-   * @param remainingOnPage Number of rows still rendered on the current page
-   *                        after the deletion (used to decide the page step-back).
+   * This deliberately does NOT touch the current page. The URL (owned by the
+   * page component) is the single source of truth for the page number, and it
+   * is responsible for stepping back when a non-first page is emptied — driving
+   * a refetch through `setPage`. Mutating `page` here as well caused a
+   * double-decrement.
+   *
+   * @param removed Number of rows that were deleted.
    */
-  const reconcileAfterDelete = useCallback((removed: number, remainingOnPage: number) => {
+  const reconcileAfterDelete = useCallback((removed: number) => {
     setPagination((prev) => {
       if (!prev) {
         return null;
@@ -190,15 +192,6 @@ export const useSubmissions = (
         pageCount: Math.max(1, Math.ceil(total / prev.pageSize)),
       };
     });
-
-    // If the page is now empty and we are not on the first page, go back one.
-    // Changing `page` triggers a refetch of the previous page.
-    if (remainingOnPage === 0) {
-      setQueryParams((prev) => {
-        const currentPage = prev.page ?? 1;
-        return currentPage > 1 ? { ...prev, page: currentPage - 1 } : prev;
-      });
-    }
   }, []);
 
   const deleteSubmission = useCallback(
@@ -207,18 +200,13 @@ export const useSubmissions = (
       try {
         await del(API.submission(documentId));
 
-        // Compute the remaining-on-page count from the currently rendered list
-        // (snapshot in scope) so the page step-back decision does not depend on
-        // setState timing.
-        const remaining = submissions.filter((sub) => sub.documentId !== documentId).length;
-
         setSubmissions((prev) => prev.filter((sub) => sub.documentId !== documentId));
-        reconcileAfterDelete(1, remaining);
+        reconcileAfterDelete(1);
       } finally {
         setIsDeleting(false);
       }
     },
-    [del, submissions, reconcileAfterDelete]
+    [del, reconcileAfterDelete]
   );
 
   const bulkDelete = useCallback(
@@ -232,14 +220,11 @@ export const useSubmissions = (
         // Single batch request to the server's deleteMany endpoint.
         // `useFetchClient`'s `del` cannot carry a request body, so use the
         // native-fetch helper which sends `{ ids }` as the DELETE payload.
+        // `rawRequest` throws (with the server's message) on a non-ok response.
         const response = await rawRequest(API.submissions(formId), {
           method: 'DELETE',
           body: { ids: documentIds },
         });
-
-        if (!response.ok) {
-          throw new Error('Failed to delete submissions');
-        }
 
         let deletedCount = documentIds.length;
         try {
@@ -251,19 +236,16 @@ export const useSubmissions = (
           // Fall back to the requested count if the body is not JSON.
         }
 
-        // Compute remaining-on-page from the rendered list snapshot.
         const idSet = new Set(documentIds);
-        const remaining = submissions.filter((sub) => !idSet.has(sub.documentId)).length;
-
         setSubmissions((prev) => prev.filter((sub) => !idSet.has(sub.documentId)));
-        reconcileAfterDelete(deletedCount, remaining);
+        reconcileAfterDelete(deletedCount);
 
         return { deleted: deletedCount };
       } finally {
         setIsDeleting(false);
       }
     },
-    [formId, submissions, reconcileAfterDelete]
+    [formId, reconcileAfterDelete]
   );
 
   const bulkUpdateStatus = useCallback(
@@ -335,6 +317,7 @@ export const useSubmissions = (
 
         // `useFetchClient` always JSON-parses the response body, which would
         // discard a `text/csv` export, so request the raw text via native fetch.
+        // `rawRequest` throws (with the server's message) on a non-ok response.
         const response = await rawRequest(
           `${API.exportSubmissions(formId)}?${params.toString()}`,
           {
@@ -342,10 +325,6 @@ export const useSubmissions = (
             accept,
           }
         );
-
-        if (!response.ok) {
-          throw new Error('Failed to export submissions');
-        }
 
         const body = response.text;
 
@@ -357,8 +336,13 @@ export const useSubmissions = (
         const link = document.createElement('a');
         link.href = url;
 
+        // Include the status (and form id) in the filename so exports of
+        // different status filters (e.g. "spam" vs "new") do not overwrite each
+        // other in the browser's downloads folder.
         const date = new Date().toISOString().split('T')[0];
-        link.download = `submissions-${date}.${format}`;
+        const statusPart = status ?? 'all';
+        const formPart = formId ? `${formId}-` : '';
+        link.download = `submissions-${formPart}${statusPart}-${date}.${format}`;
 
         document.body.appendChild(link);
         link.click();
