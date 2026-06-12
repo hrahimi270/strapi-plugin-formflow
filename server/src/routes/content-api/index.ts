@@ -26,6 +26,7 @@ export default {
       config: {
         auth: false,
         policies: ['plugin::strapi-forms.is-form-active', 'plugin::strapi-forms.rate-limit'],
+        middlewares: ['plugin::strapi-forms.spam-check'],
       },
     },
   ],
