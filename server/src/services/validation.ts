@@ -1,4 +1,17 @@
 import type { Core } from '@strapi/strapi';
+import {
+  isLayoutField,
+  isFieldVisible,
+  isEmptyValue,
+  type ConditionalRule,
+} from '../utils/validation-rules';
+import {
+  escapeHtml,
+  cleanString,
+  coerceNumber,
+  coerceBoolean,
+  stripControlChars,
+} from '../utils/sanitize';
 
 /**
  * Validation result structure returned by the validate method
@@ -28,12 +41,13 @@ export interface ValidatableField {
   requiredMessage?: string;
   validation?: ValidationRule[];
   options?: Array<{ label: string; value: string }>;
+  /** Conditional display logic; if the field is hidden, it is skipped entirely. */
+  conditional?: ConditionalRule;
 }
 
-/**
- * Layout field types that don't require validation
- */
-const LAYOUT_FIELD_TYPES = ['heading', 'paragraph', 'divider'];
+// Re-export the conditional rule type so consumers importing from the service
+// (e.g. submission service) have access to it alongside the validation types.
+export type { ConditionalRule };
 
 /**
  * Validation service for form submissions
@@ -52,7 +66,14 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     for (const field of fields) {
       // Skip layout fields (heading, paragraph, divider)
-      if (LAYOUT_FIELD_TYPES.includes(field.type)) {
+      if (isLayoutField(field.type)) {
+        continue;
+      }
+
+      // Skip fields that are hidden by their conditional rule. A hidden field
+      // is not displayed to the user, so it must not enforce 'required' or any
+      // validation rule against (typically empty) submitted data.
+      if (!isFieldVisible(field.conditional, data)) {
         continue;
       }
 
@@ -73,7 +94,7 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       if (!this.isEmpty(value)) {
         // Run custom validation rules
         for (const rule of field.validation || []) {
-          const error = this.runValidationRule(rule, value, field);
+          const error = this.runValidationRule(rule, value, field, data);
           if (error) {
             fieldErrors.push(error);
           }
@@ -109,10 +130,7 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * @returns true if the value is empty, false otherwise
    */
   isEmpty(value: unknown): boolean {
-    if (value === null || value === undefined) return true;
-    if (typeof value === 'string' && value.trim() === '') return true;
-    if (Array.isArray(value) && value.length === 0) return true;
-    return false;
+    return isEmptyValue(value);
   },
 
   /**
@@ -120,9 +138,15 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * @param rule - Validation rule to execute
    * @param value - Value to validate
    * @param field - Field definition for context
+   * @param data - Full submission data (used by cross-field rules like 'matches')
    * @returns Error message if validation fails, null otherwise
    */
-  runValidationRule(rule: ValidationRule, value: unknown, field: ValidatableField): string | null {
+  runValidationRule(
+    rule: ValidationRule,
+    value: unknown,
+    field: ValidatableField,
+    data: Record<string, unknown> = {}
+  ): string | null {
     const ruleValue = rule.value;
 
     switch (rule.type) {
@@ -265,6 +289,25 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
             return rule.message || `File type not allowed. Accepted types: ${ruleValue}`;
           }
         }
+        break;
+      }
+
+      case 'matches': {
+        // Cross-field equality (e.g. password confirmation).
+        // rule.value is the NAME of the other field this value must equal.
+        if (typeof ruleValue === 'string') {
+          const otherValue = data[ruleValue];
+          // Compare as strings so '1' (text input) matches 1, etc.
+          if (String(value) !== String(otherValue)) {
+            return rule.message || `${field.label} does not match`;
+          }
+        }
+        break;
+      }
+
+      case 'custom': {
+        // Safe no-op stub. Custom validation would require sandboxed evaluation
+        // of user-provided logic, which is intentionally not implemented here.
         break;
       }
     }
@@ -419,7 +462,7 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     for (const field of fields) {
       // Skip layout fields
-      if (LAYOUT_FIELD_TYPES.includes(field.type)) {
+      if (isLayoutField(field.type)) {
         continue;
       }
 
@@ -435,7 +478,17 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Sanitize a single value based on field type
+   * Sanitize a single value based on field type for RAW storage.
+   *
+   * ESCAPE-ON-OUTPUT MODEL: Values are stored raw-but-cleaned. String values are
+   * stripped of null bytes / control characters and trimmed, but are NOT
+   * HTML-entity-escaped here. Escaping happens at each OUTPUT boundary instead:
+   *   - email HTML rendering must call escapeHtml() on interpolated values,
+   *   - CSV export must apply CSV escaping,
+   *   - admin UI relies on React's automatic escaping.
+   * Do NOT reintroduce escapeHtml() in this function — that would double-escape
+   * at the output boundaries and corrupt stored data.
+   *
    * @param type - Field type
    * @param value - Value to sanitize
    * @returns Sanitized value
@@ -452,40 +505,30 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       case 'url':
       case 'phone':
       case 'password': {
-        // Trim whitespace and escape HTML entities
-        if (typeof value === 'string') {
-          return this.escapeHtml(value.trim());
-        }
-        return this.escapeHtml(String(value));
+        // Strip control chars and trim; store RAW (escaped on output).
+        return cleanString(value);
       }
 
       case 'number': {
-        const numValue = Number(value);
-        return isNaN(numValue) ? 0 : numValue;
+        return coerceNumber(value);
       }
 
       case 'boolean': {
-        if (typeof value === 'boolean') return value;
-        if (value === 'true' || value === 1) return true;
-        if (value === 'false' || value === 0) return false;
-        return Boolean(value);
+        return coerceBoolean(value);
       }
 
       case 'checkbox': {
-        // Ensure checkbox values are always an array
+        // Ensure checkbox values are always an array of cleaned strings.
         if (Array.isArray(value)) {
-          return value.map((v) => this.escapeHtml(String(v).trim()));
+          return value.map((v) => cleanString(v));
         }
-        return [this.escapeHtml(String(value).trim())];
+        return [cleanString(value)];
       }
 
       case 'select':
       case 'radio': {
-        // Single selection, ensure string
-        if (typeof value === 'string') {
-          return this.escapeHtml(value.trim());
-        }
-        return this.escapeHtml(String(value));
+        // Single selection, cleaned string (raw, escaped on output).
+        return cleanString(value);
       }
 
       case 'date':
@@ -507,11 +550,9 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       }
 
       case 'hidden': {
-        // Hidden fields - escape HTML but preserve value
-        if (typeof value === 'string') {
-          return this.escapeHtml(value);
-        }
-        return this.escapeHtml(String(value));
+        // Hidden fields - strip control chars but preserve value (raw, no trim
+        // to avoid altering machine-generated tokens). Escaped on output.
+        return stripControlChars(typeof value === 'string' ? value : String(value));
       }
 
       case 'file': {
@@ -526,17 +567,18 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Escape HTML entities to prevent XSS
+   * Escape HTML entities to prevent XSS.
+   *
+   * Provided for OUTPUT-boundary use (e.g. building email HTML). Under the
+   * escape-on-output model stored values are NOT escaped, so callers rendering
+   * stored data into HTML should escape with this helper at render time.
+   * Delegates to the shared util so the implementation lives in one place.
+   *
    * @param str - String to escape
    * @returns Escaped string
    */
   escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+    return escapeHtml(str);
   },
 
   /**

@@ -35,7 +35,7 @@
     },
     "status": {
       "type": "enumeration",
-      "enum": ["new", "read", "archived"],
+      "enum": ["new", "read", "processed", "archived", "spam"],
       "default": "new"
     },
     "ipAddress": {
