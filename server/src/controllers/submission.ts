@@ -72,7 +72,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
           filters,
           sort: parseSort(sort),
           limit: pageSizeNum,
-          offset: (pageNum - 1) * pageSizeNum,
+          start: (pageNum - 1) * pageSizeNum,
         }),
         submissionService.count(formId, filters),
       ]);
@@ -267,11 +267,19 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
    * Query params:
    * - status: Filter by status
    * - includeIp: Include IP address column (true/false)
+   * - includeUserAgent: Include user agent column (true/false)
+   * - includeMetadata: Include full metadata object (JSON export only, true/false)
    * - format: Export format (csv/json, default: csv)
    */
   async export(ctx: SubmissionContext) {
     const { formId } = ctx.params;
-    const { status, includeIp = 'false', format = 'csv' } = ctx.query;
+    const {
+      status,
+      includeIp = 'false',
+      includeUserAgent = 'false',
+      includeMetadata = 'false',
+      format = 'csv',
+    } = ctx.query;
 
     if (!formId) {
       return ctx.badRequest('Form ID is required');
@@ -299,6 +307,8 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         const json = await exportService.exportToJSON(formId, {
           filters,
           includeIp: includeIp === 'true',
+          includeUserAgent: includeUserAgent === 'true',
+          includeMetadata: includeMetadata === 'true',
         });
 
         ctx.set('Content-Type', 'application/json; charset=utf-8');
@@ -308,6 +318,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         const csv = await exportService.exportToCSV(formId, {
           filters,
           includeIp: includeIp === 'true',
+          includeUserAgent: includeUserAgent === 'true',
         });
 
         ctx.set('Content-Type', 'text/csv; charset=utf-8');
