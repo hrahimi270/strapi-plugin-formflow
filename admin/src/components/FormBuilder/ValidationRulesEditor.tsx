@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { useCallback, useMemo } from 'react';
 import {
   Box,
@@ -12,10 +13,12 @@ import {
   Divider,
 } from '@strapi/design-system';
 import { Trash } from '@strapi/icons';
+import { useIntl } from 'react-intl';
 
+import { getTranslation } from '../../utils/getTranslation';
 import type { ValidationRule } from '../../utils/api';
 
-interface ValidationRulesEditorProps {
+export interface ValidationRulesEditorProps {
   fieldType: string;
   rules: ValidationRule[];
   onChange: (rules: ValidationRule[]) => void;
@@ -109,14 +112,47 @@ const NUMERIC_RULES = [
 ];
 
 /**
- * ValidationRulesEditor component for configuring field validation rules
- * Provides UI for adding, editing, and removing validation rules based on field type
+ * Validates a single rule's value and returns an error message string (or
+ * `false` when valid, the shape Field.Root expects).
+ */
+const getRuleValueError = (rule: ValidationRule): string | false => {
+  // Regex pattern rules must compile.
+  if (rule.type === 'pattern') {
+    const pattern = typeof rule.value === 'string' ? rule.value : '';
+    if (!pattern) return false;
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(pattern);
+    } catch {
+      return 'Invalid regular expression';
+    }
+    return false;
+  }
+
+  // Numeric rules must be valid, non-negative numbers.
+  if (NUMERIC_RULES.includes(rule.type)) {
+    if (rule.value === undefined || rule.value === null || rule.value === '') return false;
+    const num = Number(rule.value);
+    if (Number.isNaN(num)) return 'Value must be a number';
+    if (num < 0) return 'Value cannot be negative';
+    return false;
+  }
+
+  return false;
+};
+
+/**
+ * ValidationRulesEditor component for configuring field validation rules.
+ * Provides UI for adding, editing, and removing validation rules based on field
+ * type, including inline error feedback for invalid regex / numeric values.
  */
 export const ValidationRulesEditor = ({
   fieldType,
   rules,
   onChange,
 }: ValidationRulesEditorProps) => {
+  const { formatMessage } = useIntl();
+
   // Get available rules for this field type
   const availableRules = useMemo(() => RULES_BY_TYPE[fieldType] || [], [fieldType]);
 
@@ -172,73 +208,109 @@ export const ValidationRulesEditor = ({
       <Box marginTop={4}>
         <Flex justifyContent="space-between" alignItems="center" marginBottom={3}>
           <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
-            Validation Rules
+            {formatMessage({
+              id: getTranslation('fieldEditor.validation.title'),
+              defaultMessage: 'Validation',
+            })}
           </Typography>
         </Flex>
 
         {/* Existing rules */}
         {rules.length > 0 && (
-          <Flex direction="column" gap={3} marginBottom={3}>
-            {rules.map((rule, index) => (
-              <Box key={`${rule.type}-${index}`} padding={3} background="neutral100" hasRadius>
-                <Flex justifyContent="space-between" alignItems="flex-start" marginBottom={3}>
-                  <Typography fontWeight="bold">{RULE_LABELS[rule.type] || rule.type}</Typography>
-                  <IconButton
-                    label="Remove rule"
-                    onClick={() => handleRemoveRule(index)}
-                    variant="ghost"
-                    withTooltip={false}
-                  >
-                    <Trash />
-                  </IconButton>
-                </Flex>
+          <Flex direction="column" gap={3} marginBottom={3} alignItems="stretch">
+            {rules.map((rule, index) => {
+              const valueError = getRuleValueError(rule);
+              return (
+                <Box key={`${rule.type}-${index}`} padding={3} background="neutral100" hasRadius>
+                  <Flex justifyContent="space-between" alignItems="flex-start" marginBottom={3}>
+                    <Typography fontWeight="bold">
+                      {RULE_LABELS[rule.type] || rule.type}
+                    </Typography>
+                    <IconButton
+                      label={formatMessage({
+                        id: getTranslation('common.remove'),
+                        defaultMessage: 'Remove',
+                      })}
+                      onClick={() => handleRemoveRule(index)}
+                      variant="ghost"
+                      withTooltip={false}
+                    >
+                      <Trash />
+                    </IconButton>
+                  </Flex>
 
-                <Flex direction="column" gap={3}>
-                  {/* Value input */}
-                  <Field.Root name={`rule-${index}-value`}>
-                    <Field.Label>Value</Field.Label>
-                    {NUMERIC_RULES.includes(rule.type) ? (
-                      <NumberInput
-                        value={Number(rule.value) || 0}
-                        onValueChange={(value: number | undefined) =>
-                          handleUpdateRule(index, { value })
-                        }
-                        placeholder={RULE_PLACEHOLDERS[rule.type]}
-                      />
-                    ) : (
+                  <Flex direction="column" gap={3} alignItems="stretch">
+                    {/* Value input */}
+                    <Field.Root
+                      name={`rule-${index}-value`}
+                      error={valueError}
+                      hint={RULE_HINTS[rule.type] || undefined}
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.validation.value'),
+                          defaultMessage: 'Value',
+                        })}
+                      </Field.Label>
+                      {NUMERIC_RULES.includes(rule.type) ? (
+                        <NumberInput
+                          value={rule.value === undefined ? undefined : Number(rule.value)}
+                          onValueChange={(value: number | undefined) =>
+                            handleUpdateRule(index, { value })
+                          }
+                          placeholder={RULE_PLACEHOLDERS[rule.type]}
+                        />
+                      ) : (
+                        <TextInput
+                          value={(rule.value as string) || ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            handleUpdateRule(index, { value: e.target.value })
+                          }
+                          placeholder={RULE_PLACEHOLDERS[rule.type]}
+                        />
+                      )}
+                      <Field.Hint />
+                      <Field.Error />
+                    </Field.Root>
+
+                    {/* Error message */}
+                    <Field.Root
+                      name={`rule-${index}-message`}
+                      hint="Shown when validation fails"
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.validation.message'),
+                          defaultMessage: 'Error message',
+                        })}
+                      </Field.Label>
                       <TextInput
-                        value={(rule.value as string) || ''}
+                        value={rule.message || ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleUpdateRule(index, { value: e.target.value })
+                          handleUpdateRule(index, { message: e.target.value })
                         }
-                        placeholder={RULE_PLACEHOLDERS[rule.type]}
+                        placeholder="Custom error message (optional)"
                       />
-                    )}
-                    {RULE_HINTS[rule.type] && <Field.Hint>{RULE_HINTS[rule.type]}</Field.Hint>}
-                  </Field.Root>
-
-                  {/* Error message */}
-                  <Field.Root name={`rule-${index}-message`}>
-                    <Field.Label>Error Message</Field.Label>
-                    <TextInput
-                      value={rule.message || ''}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        handleUpdateRule(index, { message: e.target.value })
-                      }
-                      placeholder="Custom error message (optional)"
-                    />
-                    <Field.Hint>Shown when validation fails</Field.Hint>
-                  </Field.Root>
-                </Flex>
-              </Box>
-            ))}
+                      <Field.Hint />
+                    </Field.Root>
+                  </Flex>
+                </Box>
+              );
+            })}
           </Flex>
         )}
 
         {/* Add rule dropdown */}
         {unusedRules.length > 0 && (
           <Box>
-            <SingleSelect placeholder="Add validation rule..." value="" onChange={handleAddRule}>
+            <SingleSelect
+              placeholder={formatMessage({
+                id: getTranslation('fieldEditor.validation.add'),
+                defaultMessage: 'Add rule',
+              })}
+              value=""
+              onChange={handleAddRule}
+            >
               {unusedRules.map((ruleType) => (
                 <SingleSelectOption key={ruleType} value={ruleType}>
                   {RULE_LABELS[ruleType] || ruleType}
@@ -252,7 +324,10 @@ export const ValidationRulesEditor = ({
         {rules.length === 0 && (
           <Box marginTop={2}>
             <Typography variant="pi" textColor="neutral500">
-              Add validation rules to enforce input requirements
+              {formatMessage({
+                id: getTranslation('fieldEditor.validation.empty'),
+                defaultMessage: 'No validation rules',
+              })}
             </Typography>
           </Box>
         )}
