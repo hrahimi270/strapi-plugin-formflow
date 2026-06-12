@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useFetchClient } from '@strapi/strapi/admin';
 import { API, Form, FormPayload, ApiResponse } from '../utils/api';
 
-interface UseFormReturn {
+export interface UseFormReturn {
   form: Form | null;
   isLoading: boolean;
   isSaving: boolean;
