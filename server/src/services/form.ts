@@ -435,34 +435,40 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
    *
    * Rather than a racy read-modify-write on the draft, this derives the count
    * from the authoritative number of related submissions so concurrent
-   * submissions cannot clobber each other. The count is written to both the
-   * draft and the published version so the public-facing record stays in sync.
+   * submissions cannot clobber each other.
+   *
+   * IMPORTANT: this must NOT call documents().update({ status: 'published' }).
+   * That writes the count to the draft and then publishes the WHOLE draft over
+   * the published version, force-publishing any in-progress unpublished admin
+   * edits to title/fields/settings on every public submit. Instead we:
+   *   1. Write the count to the DRAFT via a normal document service update
+   *      (no status change, so this stays draft-only and triggers no publish).
+   *   2. Patch ONLY the published row's `submissionCount` column directly via
+   *      the lower-level query engine, which does not run publish() and so
+   *      leaves the rest of the published record untouched.
+   * Both draft and published rows therefore stay in sync without leaking draft
+   * edits into the published, public-facing form.
    */
   async incrementSubmissionCount(documentId: string) {
     const total = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).count({
       filters: { form: { documentId } },
     });
 
-    // Write to the draft (default target for the document service).
+    // 1. Write to the draft only (default target for the document service).
     const updated = await strapi.documents(CONTENT_TYPE_UID).update({
       documentId,
       data: { submissionCount: total } as Record<string, unknown>,
     });
 
-    // Keep the published version's count in sync when one exists, so the
-    // public schema reflects the same count as the admin draft.
+    // 2. Patch the published row's column directly (if a published version
+    // exists) WITHOUT triggering publish(), so the public schema reflects the
+    // same count without copying unpublished draft edits over the published
+    // record. updateMany is a no-op when no published row matches.
     try {
-      const published = await strapi.documents(CONTENT_TYPE_UID).findOne({
-        documentId,
-        status: 'published',
+      await strapi.db.query(CONTENT_TYPE_UID).updateMany({
+        where: { documentId, publishedAt: { $notNull: true } },
+        data: { submissionCount: total },
       });
-      if (published) {
-        await strapi.documents(CONTENT_TYPE_UID).update({
-          documentId,
-          status: 'published',
-          data: { submissionCount: total } as Record<string, unknown>,
-        });
-      }
     } catch (error) {
       strapi.log.warn(
         `[Strapi Forms] Failed to sync published submissionCount for form ${documentId}: ${
