@@ -55,6 +55,12 @@ const RECAPTCHA_VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
 const DEFAULT_V3_THRESHOLD = 0.5;
 
 /**
+ * Timeout (ms) for the reCAPTCHA siteverify request. A hung Google request must
+ * not hold the submission open indefinitely; mirrors the webhook service.
+ */
+const RECAPTCHA_TIMEOUT_MS = 5000;
+
+/**
  * Shape of Google's reCAPTCHA siteverify response
  */
 interface RecaptchaVerifyResponse {
@@ -155,11 +161,26 @@ const spamCheck = (_config: unknown, { strapi }: { strapi: Core.Strapi }) => {
         params.append('secret', secret);
         params.append('response', token);
 
+        // Abort the verification request if Google does not respond in time so a
+        // hung siteverify call cannot stall the submission. Fail closed below.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RECAPTCHA_TIMEOUT_MS);
+
         const response = await fetch(RECAPTCHA_VERIFY_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: params.toString(),
+          signal: controller.signal,
         });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          strapi.log.warn(
+            `[Strapi Forms] reCAPTCHA siteverify returned HTTP ${response.status} for form "${slug}"`
+          );
+          return ctx.badRequest('reCAPTCHA verification failed');
+        }
 
         const result = (await response.json()) as RecaptchaVerifyResponse;
 
@@ -188,6 +209,8 @@ const spamCheck = (_config: unknown, { strapi }: { strapi: Core.Strapi }) => {
           }
         }
       } catch (error) {
+        // Fail closed on any error, including the AbortError raised when the
+        // siteverify request exceeds RECAPTCHA_TIMEOUT_MS.
         strapi.log.error('[Strapi Forms] reCAPTCHA verification error', error);
         return ctx.badRequest('reCAPTCHA verification failed');
       }
