@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
-import { Modal, Box, Flex, Grid, Typography, Button } from '@strapi/design-system';
+import * as React from 'react';
+import { useMemo, useState } from 'react';
+import { Modal, Box, Flex, Grid, Typography, Button, Searchbar } from '@strapi/design-system';
 import {
   Pencil,
   Mail,
@@ -13,11 +14,17 @@ import {
   File,
   Eye,
   Minus,
+  Hashtag,
+  ListPlus,
+  Paragraph,
 } from '@strapi/icons';
+import { useIntl } from 'react-intl';
+import styled from 'styled-components';
 
+import { getTranslation } from '../../utils/getTranslation';
 import type { FieldType } from '../../utils/api';
 
-interface FieldTypeSelectorProps {
+export interface FieldTypeSelectorProps {
   isOpen: boolean;
   onClose: () => void;
   onSelect: (type: string) => void;
@@ -26,34 +33,25 @@ interface FieldTypeSelectorProps {
 }
 
 /**
- * Category display order and labels
+ * Category display order (labels come from i18n)
  */
 const CATEGORY_ORDER = ['basic', 'choice', 'datetime', 'advanced', 'layout'] as const;
 
-const CATEGORY_LABELS: Record<string, string> = {
-  basic: 'Basic Fields',
-  choice: 'Choice Fields',
-  datetime: 'Date & Time',
-  advanced: 'Advanced',
-  layout: 'Layout Elements',
-};
-
 /**
- * Icon mapping for each field type
- * Using available Strapi icons
+ * Icon mapping for each field type using available Strapi icons.
  */
 const getFieldIcon = (type: string) => {
-  const icons: Record<string, JSX.Element> = {
+  const icons: Record<string, React.ReactNode> = {
     text: <Pencil />,
-    textarea: <Pencil />,
+    textarea: <Paragraph />,
     email: <Mail />,
-    number: <Pencil />,
+    number: <Hashtag />,
     phone: <Phone />,
     url: <LinkIcon />,
     password: <Lock />,
     select: <ChevronDown />,
     radio: <Check />,
-    checkbox: <Check />,
+    checkbox: <ListPlus />,
     boolean: <Check />,
     date: <Calendar />,
     time: <Clock />,
@@ -61,7 +59,7 @@ const getFieldIcon = (type: string) => {
     file: <File />,
     hidden: <Eye />,
     heading: <Pencil />,
-    paragraph: <Pencil />,
+    paragraph: <Paragraph />,
     divider: <Minus />,
   };
 
@@ -69,8 +67,51 @@ const getFieldIcon = (type: string) => {
 };
 
 /**
- * FieldTypeSelector modal component
- * Displays available field types organized by category for selection
+ * Interactive field-type tile with real hover / focus styling.
+ *
+ * Implemented as a styled native <button> wrapping a Box so that hover,
+ * focus-visible and active states actually apply (Box/`_hover` from Chakra do
+ * not work in design-system v2).
+ */
+const FieldTypeTile = styled.button`
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+  background: ${({ theme }) => theme.colors.neutral0};
+  border: 1px solid ${({ theme }) => theme.colors.neutral200};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  padding: ${({ theme }) => theme.spaces[4]};
+  transition:
+    border-color 0.15s ease-in-out,
+    background 0.15s ease-in-out,
+    box-shadow 0.15s ease-in-out;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary600};
+    background: ${({ theme }) => theme.colors.primary100};
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary600};
+    box-shadow: ${({ theme }) => theme.colors.primary600} 0px 0px 0px 2px;
+  }
+
+  &:active {
+    background: ${({ theme }) => theme.colors.primary100};
+  }
+
+  /* tint the icon with the primary color */
+  svg path {
+    fill: ${({ theme }) => theme.colors.primary600};
+  }
+`;
+
+/**
+ * FieldTypeSelector modal component.
+ * Displays available field types organized by category, with search, for
+ * selection. Tiles use real interactive styling via styled-components.
  */
 export const FieldTypeSelector = ({
   isOpen,
@@ -79,11 +120,31 @@ export const FieldTypeSelector = ({
   fieldTypes,
   isLoading = false,
 }: FieldTypeSelectorProps) => {
-  // Group field types by category
+  const { formatMessage } = useIntl();
+  const [search, setSearch] = useState('');
+
+  const categoryLabel = (category: string) =>
+    formatMessage({
+      id: getTranslation(`fieldType.category.${category}`),
+      defaultMessage: category,
+    });
+
+  const typeLabel = (fieldType: FieldType) =>
+    formatMessage({
+      id: getTranslation(`fieldType.${fieldType.type}`),
+      defaultMessage: fieldType.label,
+    });
+
+  // Filter by search query, then group by category.
   const groupedTypes = useMemo(() => {
+    const query = search.trim().toLowerCase();
     const groups: Record<string, FieldType[]> = {};
 
     for (const fieldType of fieldTypes) {
+      const label = typeLabel(fieldType).toLowerCase();
+      if (query && !label.includes(query) && !fieldType.type.includes(query)) {
+        continue;
+      }
       if (!groups[fieldType.category]) {
         groups[fieldType.category] = [];
       }
@@ -91,17 +152,20 @@ export const FieldTypeSelector = ({
     }
 
     return groups;
-  }, [fieldTypes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldTypes, search]);
 
-  // Handle field type selection
+  const hasResults = Object.keys(groupedTypes).length > 0;
+
   const handleSelect = (type: string) => {
     onSelect(type);
+    setSearch('');
     onClose();
   };
 
-  // Handle modal open state change
   const handleOpenChange = (open: boolean) => {
     if (!open) {
+      setSearch('');
       onClose();
     }
   };
@@ -110,19 +174,56 @@ export const FieldTypeSelector = ({
     <Modal.Root open={isOpen} onOpenChange={handleOpenChange}>
       <Modal.Content>
         <Modal.Header>
-          <Modal.Title>Add Field</Modal.Title>
+          <Modal.Title>
+            {formatMessage({
+              id: getTranslation('fieldType.selector.title'),
+              defaultMessage: 'Select a field type',
+            })}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
+          <Box marginBottom={4}>
+            <Searchbar
+              name="field-type-search"
+              value={search}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+              onClear={() => setSearch('')}
+              clearLabel={formatMessage({
+                id: getTranslation('common.clear'),
+                defaultMessage: 'Clear',
+              })}
+              placeholder={formatMessage({
+                id: getTranslation('fieldType.selector.search'),
+                defaultMessage: 'Search field types...',
+              })}
+            >
+              {formatMessage({
+                id: getTranslation('fieldType.selector.search'),
+                defaultMessage: 'Search field types...',
+              })}
+            </Searchbar>
+          </Box>
+
           {isLoading ? (
             <Box padding={8} textAlign="center">
-              <Typography textColor="neutral600">Loading field types...</Typography>
+              <Typography textColor="neutral600">
+                {formatMessage({
+                  id: getTranslation('common.loading'),
+                  defaultMessage: 'Loading...',
+                })}
+              </Typography>
             </Box>
-          ) : fieldTypes.length === 0 ? (
+          ) : !hasResults ? (
             <Box padding={8} textAlign="center">
-              <Typography textColor="neutral600">No field types available</Typography>
+              <Typography textColor="neutral600">
+                {formatMessage({
+                  id: getTranslation('fieldType.selector.empty'),
+                  defaultMessage: 'No field types match your search',
+                })}
+              </Typography>
             </Box>
           ) : (
-            <Flex direction="column" gap={6}>
+            <Flex direction="column" gap={6} alignItems="stretch">
               {CATEGORY_ORDER.map((category) => {
                 const types = groupedTypes[category];
                 if (!types?.length) return null;
@@ -135,44 +236,34 @@ export const FieldTypeSelector = ({
                       textTransform="uppercase"
                       fontWeight="bold"
                     >
-                      {CATEGORY_LABELS[category]}
+                      {categoryLabel(category)}
                     </Typography>
                     <Box marginTop={3}>
-                      <Grid.Root gap={3} gridCols={3}>
+                      <Grid.Root gap={3} gridCols={12}>
                         {types.map((fieldType) => (
-                          <Grid.Item key={fieldType.type} col={1}>
-                            <Box
-                              as="button"
+                          <Grid.Item
+                            key={fieldType.type}
+                            col={4}
+                            xs={6}
+                            direction="column"
+                            alignItems="stretch"
+                          >
+                            <FieldTypeTile
                               type="button"
-                              background="neutral0"
-                              borderColor="neutral200"
-                              borderStyle="solid"
-                              borderWidth="1px"
-                              hasRadius
-                              padding={4}
-                              width="100%"
-                              cursor="pointer"
                               onClick={() => handleSelect(fieldType.type)}
-                              _hover={{
-                                borderColor: 'primary600',
-                                background: 'primary100',
-                              }}
-                              style={{
-                                transition: 'all 0.2s ease-in-out',
-                              }}
                             >
                               <Flex direction="column" alignItems="center" gap={2}>
-                                <Box color="primary600">{getFieldIcon(fieldType.type)}</Box>
+                                <Flex>{getFieldIcon(fieldType.type)}</Flex>
                                 <Typography
                                   variant="pi"
                                   fontWeight="bold"
                                   textAlign="center"
                                   textColor="neutral800"
                                 >
-                                  {fieldType.label}
+                                  {typeLabel(fieldType)}
                                 </Typography>
                               </Flex>
-                            </Box>
+                            </FieldTypeTile>
                           </Grid.Item>
                         ))}
                       </Grid.Root>
@@ -185,7 +276,12 @@ export const FieldTypeSelector = ({
         </Modal.Body>
         <Modal.Footer>
           <Modal.Close>
-            <Button variant="tertiary">Cancel</Button>
+            <Button variant="tertiary">
+              {formatMessage({
+                id: getTranslation('common.cancel'),
+                defaultMessage: 'Cancel',
+              })}
+            </Button>
           </Modal.Close>
         </Modal.Footer>
       </Modal.Content>
