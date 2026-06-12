@@ -434,9 +434,12 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     const allowedValues = field.options.map((opt) => opt.value);
 
-    if (field.type === 'checkbox' && Array.isArray(value)) {
-      // Checkbox allows multiple values
-      const invalidValues = value.filter((v) => !allowedValues.includes(String(v)));
+    if (field.type === 'checkbox') {
+      // Checkbox allows multiple values. Normalize a non-array value (e.g. a
+      // single selected option submitted as a scalar) to an array so every
+      // element is still checked against the allowed-options whitelist.
+      const values = Array.isArray(value) ? value : [value];
+      const invalidValues = values.filter((v) => !allowedValues.includes(String(v)));
       if (invalidValues.length > 0) {
         return `Invalid selection: ${invalidValues.join(', ')}`;
       }
