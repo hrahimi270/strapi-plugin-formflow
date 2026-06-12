@@ -117,7 +117,13 @@ export const FormSettings = ({
         >
           <Flex direction="column" gap={4} alignItems="stretch">
             {/* Success Message */}
-            <Field.Root name="successMessage">
+            <Field.Root
+              name="successMessage"
+              hint={formatMessage({
+                id: getTranslation('settings.successMessage.hint'),
+                defaultMessage: 'Shown to the user after a successful submission',
+              })}
+            >
               <Field.Label>
                 {formatMessage({
                   id: getTranslation('settings.successMessage.label'),
@@ -134,16 +140,17 @@ export const FormSettings = ({
                   onSuccessMessageChange(e.target.value)
                 }
               />
-              <Field.Hint>
-                {formatMessage({
-                  id: getTranslation('settings.successMessage.hint'),
-                  defaultMessage: 'Shown to the user after a successful submission',
-                })}
-              </Field.Hint>
+              <Field.Hint />
             </Field.Root>
 
             {/* Redirect URL */}
-            <Field.Root name="redirectUrl">
+            <Field.Root
+              name="redirectUrl"
+              hint={formatMessage({
+                id: getTranslation('settings.redirectUrl.hint'),
+                defaultMessage: 'Redirect the user to this URL after submission',
+              })}
+            >
               <Field.Label>
                 {formatMessage({
                   id: getTranslation('settings.redirectUrl.label'),
@@ -160,12 +167,7 @@ export const FormSettings = ({
                   onRedirectUrlChange(e.target.value)
                 }
               />
-              <Field.Hint>
-                {formatMessage({
-                  id: getTranslation('settings.redirectUrl.hint'),
-                  defaultMessage: 'Redirect the user to this URL after submission',
-                })}
-              </Field.Hint>
+              <Field.Hint />
             </Field.Root>
           </Flex>
         </SettingsSection>
@@ -248,7 +250,20 @@ export const FormSettings = ({
           })}
         >
           <Box maxWidth="40rem">
-            <Field.Root name="layout">
+            <Field.Root
+              name="layout"
+              hint={
+                settings.layout === 'multi-step'
+                  ? formatMessage({
+                      id: getTranslation('settings.layout.multiStep.hint'),
+                      defaultMessage: 'Configure steps in the Form Builder tab',
+                    })
+                  : formatMessage({
+                      id: getTranslation('settings.layout.single.hint'),
+                      defaultMessage: 'All fields displayed on a single page',
+                    })
+              }
+            >
               <Field.Label>
                 {formatMessage({
                   id: getTranslation('settings.layout.label'),
@@ -274,17 +289,7 @@ export const FormSettings = ({
                   })}
                 </SingleSelectOption>
               </SingleSelect>
-              <Field.Hint>
-                {settings.layout === 'multi-step'
-                  ? formatMessage({
-                      id: getTranslation('settings.layout.multiStep.hint'),
-                      defaultMessage: 'Configure steps in the Form Builder tab',
-                    })
-                  : formatMessage({
-                      id: getTranslation('settings.layout.single.hint'),
-                      defaultMessage: 'All fields displayed on a single page',
-                    })}
-              </Field.Hint>
+              <Field.Hint />
             </Field.Root>
           </Box>
         </SettingsSection>

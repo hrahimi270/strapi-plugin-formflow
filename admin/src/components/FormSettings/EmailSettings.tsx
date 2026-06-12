@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Flex,
@@ -12,6 +12,7 @@ import {
 } from '@strapi/design-system';
 import { Plus, Trash } from '@strapi/icons';
 import { useIntl } from 'react-intl';
+import { v4 as uuidv4 } from 'uuid';
 
 import { getTranslation } from '../../utils/getTranslation';
 import { EmailNotification } from '../../utils/api';
@@ -21,18 +22,43 @@ export interface EmailSettingsProps {
   onChange: (notifications: EmailNotification[]) => void;
 }
 
+/**
+ * Notification record with a stable client-side id. The `id` keys cards and
+ * editor-local validation state so that splicing the array never aliases
+ * neighbours' state. `id` is treated as optional on the wire (the api.ts type
+ * owns the shape); the server tolerates the extra key.
+ */
+type NotificationWithId = EmailNotification & { id: string };
+
 /** Recipient list keys on EmailNotification that this editor manages. */
 type RecipientField = 'to' | 'cc' | 'bcc';
 
 /**
  * Default notification configuration
  */
-const createDefaultNotification = (): EmailNotification => ({
+const createDefaultNotification = (): NotificationWithId => ({
+  id: uuidv4(),
   enabled: true,
   to: [''],
   subject: 'New submission from {{form.title}}',
   includeData: true,
 });
+
+/**
+ * Ensure every notification has a stable `id`. Existing records persisted before
+ * the `id` field was introduced are normalised on first render.
+ */
+const withIds = (notifications: EmailNotification[]): NotificationWithId[] =>
+  notifications.map((notification) => {
+    const existing = (notification as Partial<NotificationWithId>).id;
+    return existing ? (notification as NotificationWithId) : { ...notification, id: uuidv4() };
+  });
+
+/**
+ * Whether any notification is missing an `id` (i.e. needs normalising on mount).
+ */
+const needsIds = (notifications: EmailNotification[]): boolean =>
+  notifications.some((notification) => !(notification as Partial<NotificationWithId>).id);
 
 /**
  * Validate email format. Template tokens (containing `{{`) are always allowed.
@@ -49,7 +75,19 @@ const isValidEmail = (email: string): boolean => {
  */
 export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) => {
   const { formatMessage } = useIntl();
+  // Validation errors keyed by the notification's stable id (never by array index).
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+
+  // Normalise to records that always carry a stable id for keying.
+  const items = useMemo<NotificationWithId[]>(() => withIds(notifications), [notifications]);
+
+  // Persist generated ids back to the parent when existing records lack them.
+  useEffect(() => {
+    if (needsIds(notifications)) {
+      onChange(items);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications]);
 
   const invalidEmailMessage = formatMessage({
     id: getTranslation('notifications.email.invalidEmail'),
@@ -69,18 +107,18 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
   };
 
   const addNotification = () => {
-    onChange([...notifications, createDefaultNotification()]);
+    onChange([...items, createDefaultNotification()]);
   };
 
-  const removeNotification = (index: number) => {
-    const updated = [...notifications];
+  const removeNotification = (id: string, index: number) => {
+    const updated = [...items];
     updated.splice(index, 1);
     onChange(updated);
 
     setValidationErrors((prev) => {
       const next = { ...prev };
       Object.keys(next)
-        .filter((key) => key.startsWith(`${index}-`))
+        .filter((key) => key.startsWith(`${id}-`))
         .forEach((key) => delete next[key]);
       return next;
     });
@@ -91,7 +129,7 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
     key: K,
     value: EmailNotification[K]
   ) => {
-    const updated = [...notifications];
+    const updated = [...items];
     updated[index] = { ...updated[index], [key]: value };
     onChange(updated);
   };
@@ -102,36 +140,42 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
   };
 
   const addRecipient = (index: number, field: RecipientField) => {
-    const current = getRecipients(notifications[index], field);
+    const current = getRecipients(items[index], field);
     updateNotification(index, field, [...current, '']);
   };
 
   const updateRecipient = (
+    id: string,
     notifIndex: number,
     field: RecipientField,
     recipientIndex: number,
     value: string
   ) => {
-    const current = [...getRecipients(notifications[notifIndex], field)];
+    const current = [...getRecipients(items[notifIndex], field)];
     current[recipientIndex] = value;
     updateNotification(notifIndex, field, current);
 
-    const errorKey = `${notifIndex}-${field}-${recipientIndex}`;
+    const errorKey = `${id}-${field}-${recipientIndex}`;
     setError(errorKey, value && !isValidEmail(value) ? invalidEmailMessage : null);
   };
 
-  const removeRecipient = (notifIndex: number, field: RecipientField, recipientIndex: number) => {
-    const current = [...getRecipients(notifications[notifIndex], field)];
+  const removeRecipient = (
+    id: string,
+    notifIndex: number,
+    field: RecipientField,
+    recipientIndex: number
+  ) => {
+    const current = [...getRecipients(items[notifIndex], field)];
     current.splice(recipientIndex, 1);
     updateNotification(notifIndex, field, field === 'to' && current.length === 0 ? [''] : current);
 
-    const errorKey = `${notifIndex}-${field}-${recipientIndex}`;
+    const errorKey = `${id}-${field}-${recipientIndex}`;
     setError(errorKey, null);
   };
 
-  const handleReplyToChange = (index: number, value: string) => {
+  const handleReplyToChange = (id: string, index: number, value: string) => {
     updateNotification(index, 'replyTo', value || undefined);
-    const errorKey = `${index}-replyTo`;
+    const errorKey = `${id}-replyTo`;
     setError(errorKey, value && !isValidEmail(value) ? invalidEmailMessage : null);
   };
 
@@ -142,12 +186,13 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
   };
 
   const renderRecipientEditor = (
-    notification: EmailNotification,
+    notification: NotificationWithId,
     index: number,
     field: RecipientField
   ) => {
     const recipients = getRecipients(notification, field);
     const isRequired = field === 'to';
+    const notifId = notification.id;
 
     return (
       <Box key={field}>
@@ -177,7 +222,7 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
         ) : (
           <Flex direction="column" gap={2} alignItems="stretch">
             {recipients.map((email, recipientIndex) => {
-              const errorKey = `${index}-${field}-${recipientIndex}`;
+              const errorKey = `${notifId}-${field}-${recipientIndex}`;
               const error = validationErrors[errorKey];
               return (
                 <Flex key={recipientIndex} gap={2} alignItems="flex-start">
@@ -192,7 +237,7 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                         })}
                         value={email}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          updateRecipient(index, field, recipientIndex, e.target.value)
+                          updateRecipient(notifId, index, field, recipientIndex, e.target.value)
                         }
                       />
                       <Field.Error />
@@ -203,7 +248,7 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                       id: getTranslation('notifications.email.removeRecipient'),
                       defaultMessage: 'Remove recipient',
                     })}
-                    onClick={() => removeRecipient(index, field, recipientIndex)}
+                    onClick={() => removeRecipient(notifId, index, field, recipientIndex)}
                     disabled={isRequired && recipients.length === 1}
                     variant="ghost"
                     withTooltip={false}
@@ -248,7 +293,7 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
       </Flex>
 
       {/* Empty State */}
-      {notifications.length === 0 ? (
+      {items.length === 0 ? (
         <Box padding={6} background="neutral100" hasRadius>
           <Flex justifyContent="center">
             <Typography textColor="neutral600">
@@ -261,9 +306,11 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
         </Box>
       ) : (
         <Flex direction="column" gap={4} alignItems="stretch">
-          {notifications.map((notification, index) => (
+          {items.map((notification, index) => {
+            const notifId = notification.id;
+            return (
             <Box
-              key={index}
+              key={notifId}
               padding={4}
               background="neutral0"
               hasRadius
@@ -304,7 +351,7 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                     id: getTranslation('notifications.email.remove'),
                     defaultMessage: 'Remove notification',
                   })}
-                  onClick={() => removeNotification(index)}
+                  onClick={() => removeNotification(notifId, index)}
                   variant="ghost"
                   withTooltip={false}
                 >
@@ -323,7 +370,13 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                 {/* Subject and Reply-To Row */}
                 <Flex gap={6} alignItems="flex-start">
                   <Box flex="1">
-                    <Field.Root name={`notification-${index}-subject`}>
+                    <Field.Root
+                      name={`notification-${notifId}-subject`}
+                      hint={formatMessage({
+                        id: getTranslation('notifications.email.subject.hint'),
+                        defaultMessage: 'Use {{form.title}} and {{field.name}} for dynamic values',
+                      })}
+                    >
                       <Field.Label>
                         {formatMessage({
                           id: getTranslation('notifications.email.subject.label'),
@@ -340,20 +393,18 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                           defaultMessage: 'New form submission',
                         })}
                       />
-                      <Field.Hint>
-                        {formatMessage({
-                          id: getTranslation('notifications.email.subject.hint'),
-                          defaultMessage:
-                            'Use {{form.title}} and {{field.name}} for dynamic values',
-                        })}
-                      </Field.Hint>
+                      <Field.Hint />
                     </Field.Root>
                   </Box>
 
                   <Box flex="1">
                     <Field.Root
-                      name={`notification-${index}-replyTo`}
-                      error={validationErrors[`${index}-replyTo`] || false}
+                      name={`notification-${notifId}-replyTo`}
+                      error={validationErrors[`${notifId}-replyTo`] || false}
+                      hint={formatMessage({
+                        id: getTranslation('notifications.email.replyTo.hint'),
+                        defaultMessage: "Use {{field.email}} for the submitter's email",
+                      })}
                     >
                       <Field.Label>
                         {formatMessage({
@@ -364,16 +415,11 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                       <TextInput
                         value={notification.replyTo || ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleReplyToChange(index, e.target.value)
+                          handleReplyToChange(notifId, index, e.target.value)
                         }
                         placeholder="{{field.email}}"
                       />
-                      <Field.Hint>
-                        {formatMessage({
-                          id: getTranslation('notifications.email.replyTo.hint'),
-                          defaultMessage: "Use {{field.email}} for the submitter's email",
-                        })}
-                      </Field.Hint>
+                      <Field.Hint />
                       <Field.Error />
                     </Field.Root>
                   </Box>
@@ -395,7 +441,8 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                 </Checkbox>
               </Flex>
             </Box>
-          ))}
+            );
+          })}
         </Flex>
       )}
 
