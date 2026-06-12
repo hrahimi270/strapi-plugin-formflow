@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { useCallback, useMemo } from 'react';
 import {
   Box,
@@ -12,15 +13,22 @@ import {
   Divider,
   SingleSelect,
   SingleSelectOption,
+  Grid,
+  Badge,
   Modal,
 } from '@strapi/design-system';
 import { Plus, Trash } from '@strapi/icons';
+import { useIntl } from 'react-intl';
 
+import { getTranslation } from '../../utils/getTranslation';
 import { ValidationRulesEditor } from './ValidationRulesEditor';
-import type { FormField, FieldOption } from '../../utils/api';
+import { FieldPreview } from './FieldPreview';
+import type { FormField, FieldOption, ConditionalRule } from '../../utils/api';
 
 export interface FieldEditorProps {
   field: FormField | null;
+  /** All fields in the form, used to populate the conditional-logic selector. */
+  allFields: FormField[];
   isOpen: boolean;
   onChange: (updates: Partial<FormField>) => void;
   onClose: () => void;
@@ -42,6 +50,19 @@ const LAYOUT_FIELD_TYPES = ['heading', 'paragraph', 'divider'];
 const DEFAULT_VALUE_FIELD_TYPES = ['text', 'textarea', 'email', 'number', 'hidden', 'url', 'phone'];
 
 /**
+ * Conditional operators that do not require a value input.
+ */
+const VALUELESS_OPERATORS: ConditionalRule['operator'][] = ['is_empty', 'is_not_empty'];
+
+const CONDITIONAL_OPERATORS: ConditionalRule['operator'][] = [
+  'equals',
+  'not_equals',
+  'contains',
+  'is_empty',
+  'is_not_empty',
+];
+
+/**
  * Generates a URL-friendly field name from a label
  */
 const generateFieldName = (label: string): string => {
@@ -53,23 +74,29 @@ const generateFieldName = (label: string): string => {
 };
 
 /**
- * FieldEditor modal component for editing individual field properties
- * Provides comprehensive form inputs for configuring all field properties
- * including label, name, options (for choice fields), and validation
+ * FieldEditor modal component for editing individual field properties.
+ * Provides inputs for label, name, placeholder, default value, width, options
+ * (choice fields), validation rules, and conditional display logic, plus a live
+ * read-only preview of the field.
  */
-export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorProps) => {
+export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: FieldEditorProps) => {
+  const { formatMessage } = useIntl();
+
   // Determine field type characteristics
-  const hasOptions = useMemo(
-    () => field && CHOICE_FIELD_TYPES.includes(field.type),
-    [field]
-  );
-  const isLayoutField = useMemo(
-    () => field && LAYOUT_FIELD_TYPES.includes(field.type),
-    [field]
-  );
+  const hasOptions = useMemo(() => field && CHOICE_FIELD_TYPES.includes(field.type), [field]);
+  const isLayoutField = useMemo(() => field && LAYOUT_FIELD_TYPES.includes(field.type), [field]);
   const hasDefaultValue = useMemo(
     () => field && DEFAULT_VALUE_FIELD_TYPES.includes(field.type),
     [field]
+  );
+
+  // Other fields (excluding self and layout-only fields) usable as conditions.
+  const conditionSourceFields = useMemo(
+    () =>
+      allFields.filter(
+        (f) => f.id !== field?.id && !LAYOUT_FIELD_TYPES.includes(f.type)
+      ),
+    [allFields, field]
   );
 
   // Handle label change with auto-name generation
@@ -77,13 +104,10 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
     (label: string) => {
       if (!field) return;
       const updates: Partial<FormField> = { label };
-
-      // Auto-generate name if it looks auto-generated (starts with field_)
       if (field.name.startsWith('field_')) {
         const generatedName = generateFieldName(label);
         updates.name = generatedName || `field_${Date.now()}`;
       }
-
       onChange(updates);
     },
     [field, onChange]
@@ -133,6 +157,33 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
     [field, onChange]
   );
 
+  // Conditional logic management
+  const handleToggleConditional = useCallback(
+    (enabled: boolean) => {
+      if (!enabled) {
+        onChange({ conditional: undefined });
+        return;
+      }
+      const firstField = conditionSourceFields[0];
+      onChange({
+        conditional: {
+          field: firstField ? firstField.name : '',
+          operator: 'equals',
+          value: '',
+        },
+      });
+    },
+    [conditionSourceFields, onChange]
+  );
+
+  const handleUpdateConditional = useCallback(
+    (updates: Partial<ConditionalRule>) => {
+      if (!field?.conditional) return;
+      onChange({ conditional: { ...field.conditional, ...updates } });
+    },
+    [field, onChange]
+  );
+
   // Handle modal open state change
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -142,116 +193,222 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
 
   if (!field) return null;
 
+  const operatorLabel = (op: ConditionalRule['operator']) =>
+    formatMessage({
+      id: getTranslation(`fieldEditor.conditional.operator.${op}`),
+      defaultMessage: op,
+    });
+
+  const conditionalNeedsValue =
+    field.conditional && !VALUELESS_OPERATORS.includes(field.conditional.operator);
+
   return (
     <Modal.Root open={isOpen} onOpenChange={handleOpenChange}>
       <Modal.Content>
         <Modal.Header>
-          <Modal.Title>
-            <Flex gap={3} alignItems="center">
-              <span>Edit Field</span>
-              <Box padding={1} paddingLeft={2} paddingRight={2} background="primary100" hasRadius>
-                <Typography variant="pi" fontWeight="bold" textColor="primary700">
-                  {field.type.toUpperCase()}
-                </Typography>
-              </Box>
-            </Flex>
-          </Modal.Title>
+          <Flex gap={3} alignItems="center">
+            <Modal.Title>
+              {formatMessage({
+                id: getTranslation('fieldEditor.title'),
+                defaultMessage: 'Edit Field',
+              })}
+            </Modal.Title>
+            <Badge>{field.type.toUpperCase()}</Badge>
+          </Flex>
         </Modal.Header>
 
         <Modal.Body>
-          <Flex direction="column" gap={4}>
+          <Flex direction="column" gap={4} alignItems="stretch">
+            {/* Live preview */}
+            <Box
+              padding={4}
+              background="neutral100"
+              hasRadius
+              borderColor="neutral200"
+              borderStyle="solid"
+              borderWidth="1px"
+            >
+              <Box marginBottom={2}>
+                <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
+                  {formatMessage({
+                    id: getTranslation('builder.preview'),
+                    defaultMessage: 'Preview',
+                  })}
+                </Typography>
+              </Box>
+              <FieldPreview field={field} />
+            </Box>
+
             {/* Label */}
-            <Field.Root name="label" required>
-              <Field.Label>Label</Field.Label>
+            <Field.Root
+              name="label"
+              required
+              hint={formatMessage({
+                id: getTranslation('fieldEditor.label.hint'),
+                defaultMessage: 'The label shown above the field',
+              })}
+            >
+              <Field.Label>
+                {formatMessage({
+                  id: getTranslation('fieldEditor.label.label'),
+                  defaultMessage: 'Label',
+                })}
+              </Field.Label>
               <TextInput
                 value={field.label}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   handleLabelChange(e.target.value)
                 }
-                placeholder="Enter field label"
+                placeholder={formatMessage({
+                  id: getTranslation('fieldEditor.label.placeholder'),
+                  defaultMessage: 'Field label',
+                })}
               />
-              <Field.Hint>The label shown above the field</Field.Hint>
+              <Field.Hint />
             </Field.Root>
 
             {/* Name (field key) */}
-            <Field.Root name="name" required>
-              <Field.Label>Field Name</Field.Label>
+            <Field.Root
+              name="name"
+              required
+              hint={formatMessage({
+                id: getTranslation('fieldEditor.name.hint'),
+                defaultMessage: 'Used as the key in submission data',
+              })}
+            >
+              <Field.Label>
+                {formatMessage({
+                  id: getTranslation('fieldEditor.name.label'),
+                  defaultMessage: 'Name',
+                })}
+              </Field.Label>
               <TextInput
                 value={field.name}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   handleNameChange(e.target.value)
                 }
-                placeholder="field_name"
+                placeholder={formatMessage({
+                  id: getTranslation('fieldEditor.name.placeholder'),
+                  defaultMessage: 'field_name',
+                })}
               />
-              <Field.Hint>Used as the key in form submissions (lowercase, no spaces)</Field.Hint>
+              <Field.Hint />
             </Field.Root>
 
-            {/* Only show input-specific options for non-layout fields */}
+            {/* Input-specific options for non-layout fields */}
             {!isLayoutField && (
               <>
-                {/* Placeholder */}
                 <Field.Root name="placeholder">
-                  <Field.Label>Placeholder</Field.Label>
+                  <Field.Label>
+                    {formatMessage({
+                      id: getTranslation('fieldEditor.placeholder.label'),
+                      defaultMessage: 'Placeholder',
+                    })}
+                  </Field.Label>
                   <TextInput
                     value={field.placeholder || ''}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       onChange({ placeholder: e.target.value })
                     }
-                    placeholder="Enter placeholder text"
+                    placeholder={formatMessage({
+                      id: getTranslation('fieldEditor.placeholder.placeholder'),
+                      defaultMessage: 'Placeholder text',
+                    })}
                   />
-                  <Field.Hint>Text shown when the field is empty</Field.Hint>
                 </Field.Root>
 
-                {/* Description / Help text */}
                 <Field.Root name="description">
-                  <Field.Label>Help Text</Field.Label>
+                  <Field.Label>
+                    {formatMessage({
+                      id: getTranslation('fieldEditor.description.label'),
+                      defaultMessage: 'Help Text',
+                    })}
+                  </Field.Label>
                   <Textarea
                     value={field.description || ''}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                       onChange({ description: e.target.value })
                     }
-                    placeholder="Additional help text shown below the field"
+                    placeholder={formatMessage({
+                      id: getTranslation('fieldEditor.description.placeholder'),
+                      defaultMessage: 'Help text shown below the field',
+                    })}
                   />
                 </Field.Root>
 
-                {/* Required and Width in same row */}
-                <Flex gap={6} alignItems="flex-start">
-                  <Box style={{ flex: 1 }}>
+                {/* Width + Required */}
+                <Grid.Root gap={5} gridCols={12}>
+                  <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
                     <Field.Root name="width">
-                      <Field.Label>Field Width</Field.Label>
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.width.label'),
+                          defaultMessage: 'Width',
+                        })}
+                      </Field.Label>
                       <SingleSelect
                         value={field.width || 'full'}
                         onChange={(value: string | number) =>
                           onChange({ width: value as 'full' | 'half' })
                         }
                       >
-                        <SingleSelectOption value="full">Full Width (100%)</SingleSelectOption>
-                        <SingleSelectOption value="half">Half Width (50%)</SingleSelectOption>
+                        <SingleSelectOption value="full">
+                          {formatMessage({
+                            id: getTranslation('fieldEditor.width.full'),
+                            defaultMessage: 'Full width',
+                          })}
+                        </SingleSelectOption>
+                        <SingleSelectOption value="half">
+                          {formatMessage({
+                            id: getTranslation('fieldEditor.width.half'),
+                            defaultMessage: 'Half width',
+                          })}
+                        </SingleSelectOption>
                       </SingleSelect>
                     </Field.Root>
-                  </Box>
-                  <Box style={{ flex: 1, paddingTop: '24px' }}>
-                    <Checkbox
-                      checked={field.required}
-                      onCheckedChange={(checked: boolean) => onChange({ required: checked })}
-                    >
-                      Required field
-                    </Checkbox>
-                  </Box>
-                </Flex>
+                  </Grid.Item>
+                  <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
+                    <Field.Root name="required">
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.required.label'),
+                          defaultMessage: 'Required',
+                        })}
+                      </Field.Label>
+                      <Flex height="3.2rem" alignItems="center">
+                        <Checkbox
+                          checked={field.required}
+                          onCheckedChange={(checked: boolean) => onChange({ required: checked })}
+                        >
+                          {formatMessage({
+                            id: getTranslation('fieldEditor.required.hint'),
+                            defaultMessage: 'Users must fill in this field',
+                          })}
+                        </Checkbox>
+                      </Flex>
+                    </Field.Root>
+                  </Grid.Item>
+                </Grid.Root>
 
-                {/* Default Value for supported field types */}
+                {/* Default Value */}
                 {hasDefaultValue && (
                   <Field.Root name="defaultValue">
-                    <Field.Label>Default Value</Field.Label>
+                    <Field.Label>
+                      {formatMessage({
+                        id: getTranslation('fieldEditor.defaultValue.label'),
+                        defaultMessage: 'Default Value',
+                      })}
+                    </Field.Label>
                     <TextInput
                       value={(field.defaultValue as string) || ''}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                         onChange({ defaultValue: e.target.value })
                       }
-                      placeholder="Default value"
+                      placeholder={formatMessage({
+                        id: getTranslation('fieldEditor.defaultValue.label'),
+                        defaultMessage: 'Default Value',
+                      })}
                     />
-                    <Field.Hint>Pre-filled value when the form loads</Field.Hint>
                   </Field.Root>
                 )}
 
@@ -271,7 +428,10 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
                 <Box>
                   <Flex justifyContent="space-between" alignItems="center" marginBottom={3}>
                     <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
-                      Options
+                      {formatMessage({
+                        id: getTranslation('fieldEditor.options.title'),
+                        defaultMessage: 'Options',
+                      })}
                     </Typography>
                     <Button
                       size="S"
@@ -279,34 +439,44 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
                       startIcon={<Plus />}
                       onClick={handleAddOption}
                     >
-                      Add Option
+                      {formatMessage({
+                        id: getTranslation('fieldEditor.options.add'),
+                        defaultMessage: 'Add option',
+                      })}
                     </Button>
                   </Flex>
 
                   {(field.options?.length || 0) === 0 ? (
                     <Box padding={4} background="neutral100" hasRadius textAlign="center">
                       <Typography textColor="neutral600" variant="pi">
-                        No options yet. Add at least one option.
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.options.empty'),
+                          defaultMessage: 'No options added yet',
+                        })}
                       </Typography>
                     </Box>
                   ) : (
-                    <Flex direction="column" gap={2}>
-                      {/* Column Headers */}
+                    <Flex direction="column" gap={2} alignItems="stretch">
                       <Flex gap={2} paddingBottom={1}>
                         <Box flex="1">
                           <Typography variant="pi" fontWeight="bold" textColor="neutral600">
-                            Label
+                            {formatMessage({
+                              id: getTranslation('fieldEditor.options.label'),
+                              defaultMessage: 'Label',
+                            })}
                           </Typography>
                         </Box>
                         <Box flex="1">
                           <Typography variant="pi" fontWeight="bold" textColor="neutral600">
-                            Value
+                            {formatMessage({
+                              id: getTranslation('fieldEditor.options.value'),
+                              defaultMessage: 'Value',
+                            })}
                           </Typography>
                         </Box>
                         <Box width="32px" />
                       </Flex>
 
-                      {/* Option Rows */}
                       {(field.options || []).map((option, index) => (
                         <Flex key={index} gap={2} alignItems="center">
                           <Box flex="1">
@@ -332,7 +502,10 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
                             />
                           </Box>
                           <IconButton
-                            label="Remove option"
+                            label={formatMessage({
+                              id: getTranslation('fieldEditor.options.remove'),
+                              defaultMessage: 'Remove option',
+                            })}
                             onClick={() => handleRemoveOption(index)}
                             disabled={(field.options?.length || 0) <= 1}
                             variant="ghost"
@@ -378,13 +551,136 @@ export const FieldEditor = ({ field, isOpen, onChange, onClose }: FieldEditorPro
                 />
               </Field.Root>
             )}
+
+            {/* Conditional Logic (non-layout fields only) */}
+            {!isLayoutField && (
+              <>
+                <Divider />
+                <Box>
+                  <Box marginBottom={3}>
+                    <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
+                      {formatMessage({
+                        id: getTranslation('fieldEditor.conditional.title'),
+                        defaultMessage: 'Conditional Logic',
+                      })}
+                    </Typography>
+                  </Box>
+
+                  {conditionSourceFields.length === 0 ? (
+                    <Box padding={3} background="neutral100" hasRadius>
+                      <Typography variant="pi" textColor="neutral600">
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.conditional.noFields'),
+                          defaultMessage:
+                            'Add other input fields first to make this field conditional.',
+                        })}
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Flex direction="column" gap={3} alignItems="stretch">
+                      <Checkbox
+                        checked={Boolean(field.conditional)}
+                        onCheckedChange={(checked: boolean) => handleToggleConditional(checked)}
+                      >
+                        {formatMessage({
+                          id: getTranslation('fieldEditor.conditional.enable'),
+                          defaultMessage: 'Show this field conditionally',
+                        })}
+                      </Checkbox>
+
+                      {field.conditional && (
+                        <Grid.Root gap={3} gridCols={12}>
+                          <Grid.Item col={4} xs={12} direction="column" alignItems="stretch">
+                            <Field.Root name="conditional-field">
+                              <Field.Label>
+                                {formatMessage({
+                                  id: getTranslation('fieldEditor.conditional.field'),
+                                  defaultMessage: 'When field',
+                                })}
+                              </Field.Label>
+                              <SingleSelect
+                                value={field.conditional.field}
+                                onChange={(value: string | number) =>
+                                  handleUpdateConditional({ field: String(value) })
+                                }
+                              >
+                                {conditionSourceFields.map((f) => (
+                                  <SingleSelectOption key={f.id} value={f.name}>
+                                    {f.label || f.name}
+                                  </SingleSelectOption>
+                                ))}
+                              </SingleSelect>
+                            </Field.Root>
+                          </Grid.Item>
+
+                          <Grid.Item col={4} xs={12} direction="column" alignItems="stretch">
+                            <Field.Root name="conditional-operator">
+                              <Field.Label>
+                                {formatMessage({
+                                  id: getTranslation('fieldEditor.conditional.operator'),
+                                  defaultMessage: 'Operator',
+                                })}
+                              </Field.Label>
+                              <SingleSelect
+                                value={field.conditional.operator}
+                                onChange={(value: string | number) =>
+                                  handleUpdateConditional({
+                                    operator: value as ConditionalRule['operator'],
+                                  })
+                                }
+                              >
+                                {CONDITIONAL_OPERATORS.map((op) => (
+                                  <SingleSelectOption key={op} value={op}>
+                                    {operatorLabel(op)}
+                                  </SingleSelectOption>
+                                ))}
+                              </SingleSelect>
+                            </Field.Root>
+                          </Grid.Item>
+
+                          <Grid.Item col={4} xs={12} direction="column" alignItems="stretch">
+                            <Field.Root name="conditional-value">
+                              <Field.Label>
+                                {formatMessage({
+                                  id: getTranslation('fieldEditor.conditional.value'),
+                                  defaultMessage: 'Value',
+                                })}
+                              </Field.Label>
+                              <TextInput
+                                value={(field.conditional.value as string) || ''}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                  handleUpdateConditional({ value: e.target.value })
+                                }
+                                disabled={!conditionalNeedsValue}
+                                placeholder={conditionalNeedsValue ? 'Value' : 'N/A'}
+                              />
+                            </Field.Root>
+                          </Grid.Item>
+                        </Grid.Root>
+                      )}
+                    </Flex>
+                  )}
+                </Box>
+              </>
+            )}
           </Flex>
         </Modal.Body>
 
         <Modal.Footer>
           <Modal.Close>
-            <Button variant="tertiary">Close</Button>
+            <Button variant="tertiary">
+              {formatMessage({
+                id: getTranslation('common.cancel'),
+                defaultMessage: 'Cancel',
+              })}
+            </Button>
           </Modal.Close>
+          <Button onClick={onClose}>
+            {formatMessage({
+              id: getTranslation('common.save'),
+              defaultMessage: 'Done',
+            })}
+          </Button>
         </Modal.Footer>
       </Modal.Content>
     </Modal.Root>
