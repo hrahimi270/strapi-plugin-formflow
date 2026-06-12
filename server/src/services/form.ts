@@ -40,6 +40,37 @@ export interface FormField {
 }
 
 /**
+ * Multi-step form step definition
+ */
+export interface FormStep {
+  id: string;
+  title: string;
+  description?: string;
+  fields: string[];
+}
+
+/**
+ * reCAPTCHA configuration. The secretKey is server-only and MUST NEVER be
+ * exposed through the public schema.
+ */
+export interface RecaptchaConfig {
+  enabled: boolean;
+  siteKey: string;
+  secretKey: string;
+  version: 'v2' | 'v3';
+  threshold?: number;
+}
+
+/**
+ * Spam protection configuration
+ */
+export interface SpamProtectionConfig {
+  honeypot: boolean;
+  honeypotFieldName: string;
+  recaptcha?: RecaptchaConfig;
+}
+
+/**
  * Default form settings structure
  */
 export interface FormSettings {
@@ -47,6 +78,7 @@ export interface FormSettings {
   showResetButton: boolean;
   resetButtonText: string;
   layout: 'single' | 'multi-step';
+  steps?: FormStep[];
   emailNotifications: Array<{
     enabled: boolean;
     to: string[];
@@ -61,10 +93,7 @@ export interface FormSettings {
     headers?: Record<string, string>;
     events: Array<'submission.created' | 'submission.updated'>;
   }>;
-  spam: {
-    honeypot: boolean;
-    honeypotFieldName: string;
-  };
+  spam: SpamProtectionConfig;
 }
 
 const CONTENT_TYPE_UID = 'plugin::strapi-forms.form';
@@ -91,10 +120,28 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Find a form by its slug (used for public API)
+   *
+   * Returns the PUBLISHED version of the form. With draftAndPublish enabled,
+   * the document service defaults to the draft version (publishedAt=null),
+   * which would make published+active forms appear unpublished to the public
+   * API. Passing status:'published' ensures the public-facing record is used.
    */
   async findBySlug(slug: string) {
     const forms = await strapi.documents(CONTENT_TYPE_UID).findMany({
       filters: { slug },
+      status: 'published',
+      limit: 1,
+    });
+    return forms[0] || null;
+  },
+
+  /**
+   * Find the DRAFT version of a form by its slug (admin-only lookup)
+   */
+  async findDraftBySlug(slug: string) {
+    const forms = await strapi.documents(CONTENT_TYPE_UID).findMany({
+      filters: { slug },
+      status: 'draft',
       limit: 1,
     });
     return forms[0] || null;
@@ -268,12 +315,23 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         showResetButton: settings.showResetButton || false,
         resetButtonText: settings.resetButtonText || 'Reset',
         layout: settings.layout || 'single',
-        spam: settings.spam
-          ? {
-              honeypot: settings.spam.honeypot || false,
-              honeypotFieldName: settings.spam.honeypotFieldName,
-            }
-          : { honeypot: false },
+        // Expose steps only for multi-step layouts so the frontend can render them
+        ...(settings.layout === 'multi-step' && settings.steps
+          ? { steps: settings.steps }
+          : {}),
+        spam: {
+          honeypot: settings.spam?.honeypot || false,
+          honeypotFieldName: settings.spam?.honeypotFieldName,
+          // Expose only public-safe reCAPTCHA fields (NEVER the secretKey)
+          ...(settings.spam?.recaptcha?.enabled
+            ? {
+                recaptcha: {
+                  siteKey: settings.spam.recaptcha.siteKey,
+                  version: settings.spam.recaptcha.version,
+                },
+              }
+            : {}),
+        },
       },
     };
   },
@@ -373,19 +431,47 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Increment the submission count for a form
+   * Recompute and persist the submission count for a form.
+   *
+   * Rather than a racy read-modify-write on the draft, this derives the count
+   * from the authoritative number of related submissions so concurrent
+   * submissions cannot clobber each other. The count is written to both the
+   * draft and the published version so the public-facing record stays in sync.
    */
   async incrementSubmissionCount(documentId: string) {
-    const form = await this.findOne(documentId);
-    if (!form) {
-      throw new Error('Form not found');
+    const total = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).count({
+      filters: { form: { documentId } },
+    });
+
+    // Write to the draft (default target for the document service).
+    const updated = await strapi.documents(CONTENT_TYPE_UID).update({
+      documentId,
+      data: { submissionCount: total } as Record<string, unknown>,
+    });
+
+    // Keep the published version's count in sync when one exists, so the
+    // public schema reflects the same count as the admin draft.
+    try {
+      const published = await strapi.documents(CONTENT_TYPE_UID).findOne({
+        documentId,
+        status: 'published',
+      });
+      if (published) {
+        await strapi.documents(CONTENT_TYPE_UID).update({
+          documentId,
+          status: 'published',
+          data: { submissionCount: total } as Record<string, unknown>,
+        });
+      }
+    } catch (error) {
+      strapi.log.warn(
+        `[Strapi Forms] Failed to sync published submissionCount for form ${documentId}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
     }
 
-    const currentCount = typeof form.submissionCount === 'number' ? form.submissionCount : 0;
-
-    return this.update(documentId, {
-      submissionCount: currentCount + 1,
-    });
+    return updated;
   },
 
   /**
