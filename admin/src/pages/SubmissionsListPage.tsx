@@ -1,10 +1,8 @@
-import { useState } from 'react';
+import type * as React from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useIntl } from 'react-intl';
-import { useNotification } from '@strapi/strapi/admin';
 import {
-  Main,
-  Box,
   Flex,
   Typography,
   Button,
@@ -18,41 +16,51 @@ import {
   Checkbox,
   SingleSelect,
   SingleSelectOption,
-  Loader,
-  Pagination,
-  PreviousLink,
-  NextLink,
-  PageLink,
-  Dots,
+  Dialog,
+  EmptyStateLayout,
+  Menu,
+  Field,
+  Switch,
+  VisuallyHidden,
 } from '@strapi/design-system';
-import { ArrowLeft, Trash, Download, Eye } from '@strapi/icons';
+import { Trash, Download, Eye, CheckCircle, Archive, CaretDown, WarningCircle } from '@strapi/icons';
+import { EmptyDocuments } from '@strapi/icons/symbols';
+import {
+  Page,
+  Layouts,
+  BackButton,
+  Pagination,
+  ConfirmDialog,
+  useNotification,
+  useQueryParams,
+} from '@strapi/strapi/admin';
 
 import { useSubmissions } from '../hooks/useSubmissions';
 import { useForm } from '../hooks/useForm';
 import { PLUGIN_ID } from '../pluginId';
-import { ConfirmDialog } from '../components/shared/ConfirmDialog';
+import { getTranslation } from '../utils/getTranslation';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { EmptyState } from '../components/shared/EmptyState';
-import { SubmissionStatus } from '../utils/api';
+import { SubmissionStatus, ExportFormat } from '../utils/api';
 
 /**
- * Status options for the filter dropdown
+ * Status options for the filter dropdown.
  */
-const STATUS_OPTIONS: Array<{ value: SubmissionStatus; label: string }> = [
-  { value: 'new', label: 'New' },
-  { value: 'read', label: 'Read' },
-  { value: 'processed', label: 'Processed' },
-  { value: 'archived', label: 'Archived' },
-  { value: 'spam', label: 'Spam' },
+const STATUS_OPTIONS: Array<{ value: SubmissionStatus; labelId: string; defaultLabel: string }> = [
+  { value: 'new', labelId: getTranslation('status.new'), defaultLabel: 'New' },
+  { value: 'read', labelId: getTranslation('status.read'), defaultLabel: 'Read' },
+  { value: 'processed', labelId: getTranslation('status.processed'), defaultLabel: 'Processed' },
+  { value: 'archived', labelId: getTranslation('status.archived'), defaultLabel: 'Archived' },
+  { value: 'spam', labelId: getTranslation('status.spam'), defaultLabel: 'Spam' },
 ];
 
+const DEFAULT_PAGE_SIZE = 25;
+
 /**
- * Format a date string for display
+ * Format a date string for display.
  */
 const formatDate = (dateStr: string): string => {
   try {
-    const date = new Date(dateStr);
-    return date.toLocaleString(undefined, {
+    return new Date(dateStr).toLocaleString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -65,7 +73,7 @@ const formatDate = (dateStr: string): string => {
 };
 
 /**
- * Get a preview of submission data (first 2 fields)
+ * Get a short preview of submission data (first 2 non-empty fields).
  */
 const getPreview = (data: Record<string, unknown>): string => {
   const entries = Object.entries(data)
@@ -73,7 +81,7 @@ const getPreview = (data: Record<string, unknown>): string => {
     .slice(0, 2);
 
   if (entries.length === 0) {
-    return 'No data';
+    return '—';
   }
 
   return entries
@@ -85,111 +93,165 @@ const getPreview = (data: Record<string, unknown>): string => {
     .join(' | ');
 };
 
-/**
- * Generate pagination page numbers with ellipsis
- */
-const generatePageNumbers = (currentPage: number, pageCount: number): (number | 'dots')[] => {
-  const pages: (number | 'dots')[] = [];
-  const delta = 2;
-
-  for (let i = 1; i <= pageCount; i++) {
-    if (i === 1 || i === pageCount || (i >= currentPage - delta && i <= currentPage + delta)) {
-      pages.push(i);
-    } else if (pages[pages.length - 1] !== 'dots') {
-      pages.push('dots');
-    }
-  }
-
-  return pages;
-};
+interface SubmissionsQuery {
+  page?: string;
+  pageSize?: string;
+  status?: SubmissionStatus;
+}
 
 export const SubmissionsListPage = () => {
   const { formId } = useParams<{ formId: string }>();
+
+  // The URL query is the source of truth for page / pageSize / status so the
+  // view survives a refresh and the native <Pagination> can drive it directly.
+  const [{ query }, setQuery] = useQueryParams<SubmissionsQuery>();
+  const page = Number(query.page) || 1;
+  const pageSize = Number(query.pageSize) || DEFAULT_PAGE_SIZE;
+  const status = query.status;
+
+  const { form, isLoading: isLoadingForm } = useForm(formId);
+
+  // `useSubmissions` keeps its own query state internally and only reads
+  // `initialQueryParams` on mount, so we remount its consumer whenever the
+  // page size or status (the params it has no public setter for) change by
+  // keying <SubmissionsView>. Page changes — the frequent case — are pushed
+  // through the hook's `setPage` without a remount.
+  return (
+    <SubmissionsView
+      key={`${pageSize}-${status ?? 'all'}`}
+      formId={formId!}
+      page={page}
+      pageSize={pageSize}
+      status={status}
+      form={form}
+      isLoadingForm={isLoadingForm}
+      setQuery={setQuery}
+    />
+  );
+};
+
+interface SubmissionsViewProps {
+  formId: string;
+  page: number;
+  pageSize: number;
+  status?: SubmissionStatus;
+  form: ReturnType<typeof useForm>['form'];
+  isLoadingForm: boolean;
+  setQuery: (params: SubmissionsQuery) => void;
+}
+
+const SubmissionsView = ({
+  formId,
+  page,
+  pageSize,
+  status,
+  form,
+  isLoadingForm,
+  setQuery,
+}: SubmissionsViewProps) => {
   const navigate = useNavigate();
   const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
 
-  // Fetch form details
-  const { form, isLoading: isLoadingForm } = useForm(formId);
-
-  // Fetch submissions with pagination
   const {
     submissions,
     pagination,
     isLoading,
     isDeleting,
+    isUpdating,
     isExporting,
     error,
-    filters,
-    setFilters,
     setPage,
     deleteSubmission,
     bulkDelete,
+    bulkUpdateStatus,
     exportSubmissions,
-    refetch,
-  } = useSubmissions(formId!);
+  } = useSubmissions(formId, { page, pageSize, status });
+
+  // Page changes flow through the URL; push them into the hook (no remount).
+  useEffect(() => {
+    setPage(page);
+  }, [page, setPage]);
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // Delete confirmation dialog state
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Delete dialog state
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
-  // Toggle single selection
+  // IP inclusion for export
+  const [includeIp, setIncludeIp] = useState(false);
+
+  const tabTitle = formatMessage({
+    id: getTranslation('submissions.title'),
+    defaultMessage: 'Submissions',
+  });
+
   const toggleSelection = (id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
   };
 
-  // Toggle all selections on current page
-  const toggleAll = () => {
-    if (selectedIds.length === submissions.length && submissions.length > 0) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(submissions.map((s) => s.documentId));
+  const toggleAll = (selected: boolean | 'indeterminate') => {
+    setSelectedIds(selected === true ? submissions.map((s) => s.documentId) : []);
+  };
+
+  /**
+   * After deleting `removedIds`, if the current page is now empty and we are
+   * not on the first page, step the URL back one page so the user is not left
+   * on a stranded empty page. The URL is the source of truth, so we update it
+   * directly rather than fighting the hook's own page reconciliation.
+   */
+  const stepBackIfPageEmptied = (removedIds: string[]) => {
+    const removed = new Set(removedIds);
+    const remaining = submissions.filter((s) => !removed.has(s.documentId)).length;
+    if (remaining === 0 && page > 1) {
+      setQuery({ page: String(page - 1) });
     }
   };
 
-  // Handle single delete
   const handleDeleteConfirm = async () => {
-    if (!deletingId) return;
-
+    if (!deletingId) {
+      return;
+    }
+    const idToDelete = deletingId;
     try {
-      await deleteSubmission(deletingId);
+      await deleteSubmission(idToDelete);
       toggleNotification({
         type: 'success',
         message: formatMessage({
-          id: 'strapi-forms.submissions.delete.success',
+          id: getTranslation('submissions.delete.success'),
           defaultMessage: 'Submission deleted successfully',
         }),
       });
-      setSelectedIds((prev) => prev.filter((id) => id !== deletingId));
+      setSelectedIds((prev) => prev.filter((id) => id !== idToDelete));
+      stepBackIfPageEmptied([idToDelete]);
     } catch {
       toggleNotification({
         type: 'danger',
         message: formatMessage({
-          id: 'strapi-forms.submissions.delete.error',
+          id: getTranslation('submissions.delete.error'),
           defaultMessage: 'Failed to delete submission',
         }),
       });
     } finally {
-      setDeleteDialogOpen(false);
       setDeletingId(null);
     }
   };
 
-  // Handle bulk delete
   const handleBulkDeleteConfirm = async () => {
-    if (selectedIds.length === 0) return;
-
+    if (selectedIds.length === 0) {
+      return;
+    }
+    const idsToDelete = selectedIds;
     try {
-      const result = await bulkDelete(selectedIds);
+      const result = await bulkDelete(idsToDelete);
+      stepBackIfPageEmptied(idsToDelete);
       toggleNotification({
         type: 'success',
         message: formatMessage(
           {
-            id: 'strapi-forms.submissions.bulkDelete.success',
+            id: getTranslation('submissions.bulkDelete.success'),
             defaultMessage: '{count} submission(s) deleted successfully',
           },
           { count: result.deleted }
@@ -200,23 +262,50 @@ export const SubmissionsListPage = () => {
       toggleNotification({
         type: 'danger',
         message: formatMessage({
-          id: 'strapi-forms.submissions.bulkDelete.error',
+          id: getTranslation('submissions.bulkDelete.error'),
           defaultMessage: 'Failed to delete submissions',
         }),
       });
     } finally {
-      setBulkDeleteDialogOpen(false);
+      setBulkDeleteOpen(false);
     }
   };
 
-  // Handle export
-  const handleExport = async (format: 'csv' | 'json' = 'csv') => {
+  const handleBulkStatus = async (newStatus: SubmissionStatus) => {
+    if (selectedIds.length === 0) {
+      return;
+    }
     try {
-      await exportSubmissions(format, filters.status);
+      await bulkUpdateStatus(selectedIds, newStatus);
+      toggleNotification({
+        type: 'success',
+        message: formatMessage(
+          {
+            id: getTranslation('submissions.bulkStatus.success'),
+            defaultMessage: '{count} submission(s) updated',
+          },
+          { count: selectedIds.length }
+        ),
+      });
+      setSelectedIds([]);
+    } catch {
+      toggleNotification({
+        type: 'danger',
+        message: formatMessage({
+          id: getTranslation('submissions.bulkStatus.error'),
+          defaultMessage: 'Failed to update submissions',
+        }),
+      });
+    }
+  };
+
+  const handleExport = async (format: ExportFormat) => {
+    try {
+      await exportSubmissions(format, status, { includeIp });
       toggleNotification({
         type: 'success',
         message: formatMessage({
-          id: 'strapi-forms.submissions.export.success',
+          id: getTranslation('submissions.export.success'),
           defaultMessage: 'Export started',
         }),
       });
@@ -224,200 +313,265 @@ export const SubmissionsListPage = () => {
       toggleNotification({
         type: 'danger',
         message: formatMessage({
-          id: 'strapi-forms.submissions.export.error',
+          id: getTranslation('submissions.export.error'),
           defaultMessage: 'Failed to export submissions',
         }),
       });
     }
   };
 
-  // Handle status filter change
   const handleStatusFilterChange = (value: string | number) => {
-    setFilters({ status: (value as SubmissionStatus) || undefined });
-    setSelectedIds([]); // Clear selection when filter changes
-  };
-
-  // Clear status filter
-  const handleClearStatusFilter = () => {
-    setFilters({ status: undefined });
     setSelectedIds([]);
+    if (value) {
+      setQuery({ status: value as SubmissionStatus, page: '1' });
+    } else {
+      setQuery({ status: undefined, page: '1' });
+    }
   };
 
-  // Navigate to submission detail
   const handleViewSubmission = (documentId: string) => {
     navigate(`/plugins/${PLUGIN_ID}/submissions/${documentId}`);
   };
 
-  // Navigate back to forms
-  const handleBack = () => {
-    navigate(`/plugins/${PLUGIN_ID}`);
-  };
-
-  // Loading state
   if (isLoading && submissions.length === 0) {
-    return (
-      <Main>
-        <Box padding={8}>
-          <Flex justifyContent="center" alignItems="center" minHeight="400px">
-            <Loader>Loading submissions...</Loader>
-          </Flex>
-        </Box>
-      </Main>
-    );
+    return <Page.Loading />;
   }
 
-  // Error state
   if (error) {
-    return (
-      <Main>
-        <Box padding={8}>
-          <EmptyState
-            title="Error loading submissions"
-            description={error.message}
-            action={
-              <Button onClick={() => refetch()} variant="secondary">
-                Try again
-              </Button>
-            }
-          />
-        </Box>
-      </Main>
-    );
+    return <Page.Error />;
   }
 
-  const isAllSelected = selectedIds.length === submissions.length && submissions.length > 0;
-  const isIndeterminate = selectedIds.length > 0 && selectedIds.length < submissions.length;
+  const numberOfSubmissions = submissions.length;
+  const isAllSelected = selectedIds.length === numberOfSubmissions && numberOfSubmissions > 0;
+  const isIndeterminate = selectedIds.length > 0 && selectedIds.length < numberOfSubmissions;
 
   return (
-    <Main>
-      {/* Header */}
-      <Box padding={8} background="neutral100">
-        <Flex justifyContent="space-between" alignItems="center">
-          <Flex alignItems="center" gap={4}>
-            <IconButton label="Back to forms" onClick={handleBack} variant="tertiary" withTooltip={false}>
-              <ArrowLeft />
-            </IconButton>
-            <Box>
-              <Typography variant="alpha" as="h1">
-                Submissions
-              </Typography>
-              <Typography variant="epsilon" textColor="neutral600">
-                {isLoadingForm ? 'Loading...' : form?.title || 'Unknown form'}
-              </Typography>
-            </Box>
-          </Flex>
-          <Flex gap={2}>
-            <Button
+    <Page.Main>
+      <Page.Title>{tabTitle}</Page.Title>
+      <Layouts.Header
+        navigationAction={<BackButton disabled={false} fallback={`/plugins/${PLUGIN_ID}`} />}
+        title={tabTitle}
+        subtitle={
+          isLoadingForm
+            ? formatMessage({ id: getTranslation('common.loading'), defaultMessage: 'Loading...' })
+            : form?.title ||
+              formatMessage({
+                id: getTranslation('submissions.unknownForm'),
+                defaultMessage: 'Unknown form',
+              })
+        }
+        primaryAction={
+          <Menu.Root>
+            <Menu.Trigger
               variant="secondary"
               startIcon={<Download />}
-              onClick={() => handleExport('csv')}
+              endIcon={<CaretDown />}
               loading={isExporting}
-              disabled={submissions.length === 0}
+              disabled={numberOfSubmissions === 0}
             >
-              Export CSV
-            </Button>
-          </Flex>
-        </Flex>
-      </Box>
+              {formatMessage({
+                id: getTranslation('submissions.export'),
+                defaultMessage: 'Export',
+              })}
+            </Menu.Trigger>
+            <Menu.Content>
+              <Menu.Item onSelect={() => handleExport('csv')}>
+                {formatMessage({
+                  id: getTranslation('submissions.export.csv'),
+                  defaultMessage: 'Export as CSV',
+                })}
+              </Menu.Item>
+              <Menu.Item onSelect={() => handleExport('json')}>
+                {formatMessage({
+                  id: getTranslation('submissions.export.json'),
+                  defaultMessage: 'Export as JSON',
+                })}
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
+        }
+      />
 
-      {/* Filters and Bulk Actions */}
-      <Box padding={8}>
-        <Flex justifyContent="space-between" alignItems="center" marginBottom={4}>
-          <Flex gap={4} alignItems="center">
-            <SingleSelect
-              placeholder="Filter by status"
-              value={filters.status || ''}
-              onChange={handleStatusFilterChange}
-              onClear={handleClearStatusFilter}
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <SingleSelectOption key={option.value} value={option.value}>
-                  {option.label}
-                </SingleSelectOption>
-              ))}
-            </SingleSelect>
-
-            {pagination && (
-              <Typography textColor="neutral600" variant="pi">
-                {pagination.total} submission{pagination.total !== 1 ? 's' : ''}
+      {selectedIds.length > 0 && (
+        <Layouts.Action
+          startActions={
+            <>
+              <Typography variant="epsilon" textColor="neutral600">
+                {formatMessage(
+                  {
+                    id: getTranslation('submissions.selected'),
+                    defaultMessage:
+                      '{count, plural, one {# submission} other {# submissions}} selected',
+                  },
+                  { count: selectedIds.length }
+                )}
               </Typography>
-            )}
-          </Flex>
-
-          {selectedIds.length > 0 && (
-            <Flex gap={2} alignItems="center">
-              <Typography textColor="neutral600">{selectedIds.length} selected</Typography>
+              <Button
+                variant="secondary"
+                startIcon={<CheckCircle />}
+                onClick={() => handleBulkStatus('read')}
+                loading={isUpdating}
+              >
+                {formatMessage({
+                  id: getTranslation('submissions.bulk.markRead'),
+                  defaultMessage: 'Mark as read',
+                })}
+              </Button>
+              <Button
+                variant="secondary"
+                startIcon={<Archive />}
+                onClick={() => handleBulkStatus('archived')}
+                loading={isUpdating}
+              >
+                {formatMessage({
+                  id: getTranslation('submissions.bulk.markArchived'),
+                  defaultMessage: 'Mark as archived',
+                })}
+              </Button>
               <Button
                 variant="danger-light"
                 startIcon={<Trash />}
-                onClick={() => setBulkDeleteDialogOpen(true)}
+                onClick={() => setBulkDeleteOpen(true)}
                 loading={isDeleting}
               >
-                Delete selected
+                {formatMessage({ id: getTranslation('common.delete'), defaultMessage: 'Delete' })}
               </Button>
-            </Flex>
-          )}
-        </Flex>
+            </>
+          }
+        />
+      )}
 
-        {/* Empty state */}
-        {submissions.length === 0 ? (
-          <EmptyState
-            title="No submissions yet"
-            description={
-              filters.status
-                ? `No submissions with status "${filters.status}" found.`
-                : 'This form has not received any submissions yet.'
-            }
-            action={
-              filters.status ? (
-                <Button onClick={handleClearStatusFilter} variant="secondary">
-                  Clear filter
-                </Button>
-              ) : undefined
-            }
-          />
-        ) : (
+      {selectedIds.length === 0 && (
+        <Layouts.Action
+          startActions={
+            <Flex gap={4} alignItems="end" wrap="wrap">
+              <Field.Root
+                name="status-filter"
+              hint={formatMessage(
+                {
+                  id: getTranslation('submissions.count'),
+                  defaultMessage: '{count, plural, one {# submission} other {# submissions}}',
+                },
+                { count: pagination?.total ?? 0 }
+              )}
+            >
+              <SingleSelect
+                aria-label={formatMessage({
+                  id: getTranslation('submissions.filter.status'),
+                  defaultMessage: 'Filter by status',
+                })}
+                placeholder={formatMessage({
+                  id: getTranslation('submissions.filter.status'),
+                  defaultMessage: 'Filter by status',
+                })}
+                value={status || ''}
+                onChange={handleStatusFilterChange}
+                onClear={() => handleStatusFilterChange('')}
+                clearLabel={formatMessage({
+                  id: getTranslation('submissions.clearFilter'),
+                  defaultMessage: 'Clear filter',
+                })}
+              >
+                {STATUS_OPTIONS.map((option) => (
+                  <SingleSelectOption key={option.value} value={option.value}>
+                    {formatMessage({ id: option.labelId, defaultMessage: option.defaultLabel })}
+                  </SingleSelectOption>
+                ))}
+              </SingleSelect>
+            </Field.Root>
+
+            <Field.Root name="include-ip">
+              <Flex gap={2} alignItems="center" paddingBottom={2}>
+                <Switch
+                  checked={includeIp}
+                  onCheckedChange={(checked: boolean) => setIncludeIp(checked)}
+                  onLabel={formatMessage({ id: getTranslation('common.on'), defaultMessage: 'On' })}
+                  offLabel={formatMessage({
+                    id: getTranslation('common.off'),
+                    defaultMessage: 'Off',
+                  })}
+                  aria-label={formatMessage({
+                    id: getTranslation('submissions.export.includeIp'),
+                    defaultMessage: 'Include IP address in export',
+                  })}
+                  visibleLabels
+                />
+                <Typography variant="pi" textColor="neutral600">
+                  {formatMessage({
+                    id: getTranslation('submissions.export.includeIp'),
+                    defaultMessage: 'Include IP address in export',
+                  })}
+                </Typography>
+              </Flex>
+            </Field.Root>
+            </Flex>
+          }
+        />
+      )}
+
+      <Layouts.Content>
+        {numberOfSubmissions > 0 ? (
           <>
-            {/* Submissions Table */}
-            <Table colCount={5} rowCount={submissions.length}>
+            <Table colCount={5} rowCount={numberOfSubmissions + 1}>
               <Thead>
                 <Tr>
                   <Th>
                     <Checkbox
-                      aria-label="Select all"
-                      checked={isAllSelected}
-                      indeterminate={isIndeterminate}
+                      aria-label={formatMessage({
+                        id: getTranslation('common.selectAll'),
+                        defaultMessage: 'Select all entries',
+                      })}
+                      checked={isIndeterminate ? 'indeterminate' : isAllSelected}
                       onCheckedChange={toggleAll}
                     />
                   </Th>
                   <Th>
                     <Typography variant="sigma" textColor="neutral600">
-                      Status
+                      {formatMessage({
+                        id: getTranslation('submissions.column.status'),
+                        defaultMessage: 'Status',
+                      })}
                     </Typography>
                   </Th>
                   <Th>
                     <Typography variant="sigma" textColor="neutral600">
-                      Submitted
+                      {formatMessage({
+                        id: getTranslation('submissions.column.submitted'),
+                        defaultMessage: 'Submitted',
+                      })}
                     </Typography>
                   </Th>
                   <Th>
                     <Typography variant="sigma" textColor="neutral600">
-                      Preview
+                      {formatMessage({
+                        id: getTranslation('submissions.column.preview'),
+                        defaultMessage: 'Preview',
+                      })}
                     </Typography>
                   </Th>
                   <Th>
-                    <Typography variant="sigma" textColor="neutral600">
-                      Actions
-                    </Typography>
+                    <VisuallyHidden>
+                      {formatMessage({
+                        id: getTranslation('submissions.column.actions'),
+                        defaultMessage: 'Actions',
+                      })}
+                    </VisuallyHidden>
                   </Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {submissions.map((submission) => (
-                  <Tr key={submission.documentId}>
-                    <Td>
+                  <Tr
+                    key={submission.documentId}
+                    onClick={() => handleViewSubmission(submission.documentId)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                       <Checkbox
-                        aria-label={`Select submission ${submission.documentId}`}
+                        aria-label={`${formatMessage({
+                          id: getTranslation('common.select'),
+                          defaultMessage: 'Select',
+                        })} ${submission.documentId}`}
                         checked={selectedIds.includes(submission.documentId)}
                         onCheckedChange={() => toggleSelection(submission.documentId)}
                       />
@@ -435,24 +589,25 @@ export const SubmissionsListPage = () => {
                         {getPreview(submission.data)}
                       </Typography>
                     </Td>
-                    <Td>
-                      <Flex gap={1}>
+                    <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                      <Flex gap={1} justifyContent="flex-end">
                         <IconButton
-                          label="View submission"
+                          label={formatMessage({
+                            id: getTranslation('submissions.action.view'),
+                            defaultMessage: 'View submission',
+                          })}
                           onClick={() => handleViewSubmission(submission.documentId)}
                           variant="ghost"
-                          withTooltip={false}
                         >
                           <Eye />
                         </IconButton>
                         <IconButton
-                          label="Delete submission"
-                          onClick={() => {
-                            setDeletingId(submission.documentId);
-                            setDeleteDialogOpen(true);
-                          }}
+                          label={formatMessage({
+                            id: getTranslation('submissions.action.delete'),
+                            defaultMessage: 'Delete submission',
+                          })}
+                          onClick={() => setDeletingId(submission.documentId)}
                           variant="ghost"
-                          withTooltip={false}
                         >
                           <Trash />
                         </IconButton>
@@ -463,70 +618,77 @@ export const SubmissionsListPage = () => {
               </Tbody>
             </Table>
 
-            {/* Pagination */}
-            {pagination && pagination.pageCount > 1 && (
-              <Box marginTop={4}>
-                <Flex justifyContent="space-between" alignItems="center">
-                  <Typography textColor="neutral600" variant="pi">
-                    Page {pagination.page} of {pagination.pageCount}
-                  </Typography>
-                  <Pagination activePage={pagination.page} pageCount={pagination.pageCount}>
-                    <PreviousLink
-                      onClick={() => setPage(Math.max(1, pagination.page - 1))}
-                      disabled={pagination.page <= 1}
-                    >
-                      Previous
-                    </PreviousLink>
-                    {generatePageNumbers(pagination.page, pagination.pageCount).map(
-                      (page, index) =>
-                        page === 'dots' ? (
-                          <Dots key={`dots-${index}`} />
-                        ) : (
-                          <PageLink key={page} number={page} onClick={() => setPage(page)}>
-                            {page}
-                          </PageLink>
-                        )
-                    )}
-                    <NextLink
-                      onClick={() => setPage(Math.min(pagination.pageCount, pagination.page + 1))}
-                      disabled={pagination.page >= pagination.pageCount}
-                    >
-                      Next
-                    </NextLink>
-                  </Pagination>
-                </Flex>
-              </Box>
-            )}
+            <Pagination.Root
+              pageCount={pagination?.pageCount ?? 1}
+              defaultPageSize={DEFAULT_PAGE_SIZE}
+              total={pagination?.total ?? 0}
+            >
+              <Pagination.PageSize options={['10', '25', '50', '100']} />
+              <Pagination.Links />
+            </Pagination.Root>
           </>
+        ) : (
+          <EmptyStateLayout
+            icon={<EmptyDocuments width="160px" />}
+            content={
+              status
+                ? formatMessage(
+                    {
+                      id: getTranslation('submissions.empty.filtered'),
+                      defaultMessage: 'No submissions with status "{status}" found.',
+                    },
+                    { status }
+                  )
+                : formatMessage({
+                    id: getTranslation('submissions.empty'),
+                    defaultMessage: 'This form has not received any submissions yet.',
+                  })
+            }
+            action={
+              status ? (
+                <Button variant="secondary" onClick={() => handleStatusFilterChange('')}>
+                  {formatMessage({
+                    id: getTranslation('submissions.clearFilter'),
+                    defaultMessage: 'Clear filter',
+                  })}
+                </Button>
+              ) : null
+            }
+          />
         )}
-      </Box>
+      </Layouts.Content>
 
-      {/* Single Delete Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={deleteDialogOpen}
-        onClose={() => {
-          setDeleteDialogOpen(false);
-          setDeletingId(null);
+      {/* Single delete confirmation */}
+      <Dialog.Root
+        open={deletingId !== null}
+        onOpenChange={(open: boolean) => {
+          if (!open) {
+            setDeletingId(null);
+          }
         }}
-        onConfirm={handleDeleteConfirm}
-        title="Delete Submission"
-        message="Are you sure you want to delete this submission? This action cannot be undone."
-        confirmLabel="Delete"
-        variant="danger"
-        isConfirming={isDeleting}
-      />
+      >
+        <ConfirmDialog onConfirm={handleDeleteConfirm} variant="danger-light" icon={<WarningCircle />}>
+          {formatMessage({
+            id: getTranslation('submissions.delete.confirm'),
+            defaultMessage:
+              'Are you sure you want to delete this submission? This action cannot be undone.',
+          })}
+        </ConfirmDialog>
+      </Dialog.Root>
 
-      {/* Bulk Delete Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={bulkDeleteDialogOpen}
-        onClose={() => setBulkDeleteDialogOpen(false)}
-        onConfirm={handleBulkDeleteConfirm}
-        title="Delete Submissions"
-        message={`Are you sure you want to delete ${selectedIds.length} submission(s)? This action cannot be undone.`}
-        confirmLabel="Delete All"
-        variant="danger"
-        isConfirming={isDeleting}
-      />
-    </Main>
+      {/* Bulk delete confirmation */}
+      <Dialog.Root open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <ConfirmDialog onConfirm={handleBulkDeleteConfirm} variant="danger-light" icon={<WarningCircle />}>
+          {formatMessage(
+            {
+              id: getTranslation('submissions.bulkDelete.confirm'),
+              defaultMessage:
+                'Are you sure you want to delete {count} submission(s)? This action cannot be undone.',
+            },
+            { count: selectedIds.length }
+          )}
+        </ConfirmDialog>
+      </Dialog.Root>
+    </Page.Main>
   );
 };
