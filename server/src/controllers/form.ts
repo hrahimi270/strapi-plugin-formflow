@@ -17,13 +17,65 @@ export interface Context {
 const formController = ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
    * GET /strapi-forms/forms
-   * List all forms with optional filtering
+   * List all forms with pagination, sorting, and optional search.
+   *
+   * Query params:
+   * - page: Page number (default: 1)
+   * - pageSize: Items per page (default: 100)
+   * - sort: Sort string "field:direction" (default: createdAt:desc)
+   * - _q: Optional search term matched against title/slug ($containsi)
+   *
+   * Returns a paginated envelope:
+   * { data: Form[], meta: { pagination: { page, pageSize, pageCount, total } } }
    */
   async find(ctx: Context) {
     try {
-      const forms = await strapi.plugin('strapi-forms').service('form').find(ctx.query);
+      const query = ctx.query as Record<string, unknown>;
 
-      return { data: forms };
+      const page = Math.max(1, parseInt(String(query.page ?? '1'), 10) || 1);
+      const pageSize = Math.min(
+        500,
+        Math.max(1, parseInt(String(query.pageSize ?? '100'), 10) || 100)
+      );
+
+      // Parse sort "field:direction" -> { field: direction }
+      const sortParam = typeof query.sort === 'string' ? query.sort : 'createdAt:desc';
+      const [sortField, sortDir] = sortParam.split(':');
+      const sort: Record<string, 'asc' | 'desc'> = {
+        [sortField || 'createdAt']: sortDir === 'asc' ? 'asc' : 'desc',
+      };
+
+      // Optional search across title and slug
+      const search = typeof query._q === 'string' ? query._q.trim() : '';
+      const filters: Record<string, unknown> = search
+        ? {
+            $or: [{ title: { $containsi: search } }, { slug: { $containsi: search } }],
+          }
+        : {};
+
+      const formService = strapi.plugin('strapi-forms').service('form');
+
+      const [forms, total] = await Promise.all([
+        formService.find({
+          filters,
+          sort,
+          start: (page - 1) * pageSize,
+          limit: pageSize,
+        }),
+        formService.count(filters),
+      ]);
+
+      return {
+        data: forms,
+        meta: {
+          pagination: {
+            page,
+            pageSize,
+            pageCount: Math.ceil(total / pageSize),
+            total,
+          },
+        },
+      };
     } catch (error) {
       strapi.log.error('Error fetching forms:', error);
       ctx.throw(500, error);
