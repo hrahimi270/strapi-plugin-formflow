@@ -11,12 +11,18 @@ import {
   Divider,
 } from '@strapi/design-system';
 import { Plus, Trash } from '@strapi/icons';
+import { useIntl } from 'react-intl';
+
+import { getTranslation } from '../../utils/getTranslation';
 import { EmailNotification } from '../../utils/api';
 
-interface EmailSettingsProps {
+export interface EmailSettingsProps {
   notifications: EmailNotification[];
   onChange: (notifications: EmailNotification[]) => void;
 }
+
+/** Recipient list keys on EmailNotification that this editor manages. */
+type RecipientField = 'to' | 'cc' | 'bcc';
 
 /**
  * Default notification configuration
@@ -29,12 +35,12 @@ const createDefaultNotification = (): EmailNotification => ({
 });
 
 /**
- * Validate email format
+ * Validate email format. Template tokens (containing `{{`) are always allowed.
  */
 const isValidEmail = (email: string): boolean => {
   if (!email) return true;
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (email.includes('{{')) return true;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 };
 
@@ -42,7 +48,25 @@ const isValidEmail = (email: string): boolean => {
  * EmailSettings component for configuring email notifications
  */
 export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) => {
+  const { formatMessage } = useIntl();
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+
+  const invalidEmailMessage = formatMessage({
+    id: getTranslation('notifications.email.invalidEmail'),
+    defaultMessage: 'Invalid email format',
+  });
+
+  const setError = (key: string, message: string | null) => {
+    setValidationErrors((prev) => {
+      const next = { ...prev };
+      if (message) {
+        next[key] = message;
+      } else {
+        delete next[key];
+      }
+      return next;
+    });
+  };
 
   const addNotification = () => {
     onChange([...notifications, createDefaultNotification()]);
@@ -53,11 +77,13 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
     updated.splice(index, 1);
     onChange(updated);
 
-    const newErrors = { ...validationErrors };
-    Object.keys(newErrors)
-      .filter((key) => key.startsWith(`${index}-`))
-      .forEach((key) => delete newErrors[key]);
-    setValidationErrors(newErrors);
+    setValidationErrors((prev) => {
+      const next = { ...prev };
+      Object.keys(next)
+        .filter((key) => key.startsWith(`${index}-`))
+        .forEach((key) => delete next[key]);
+      return next;
+    });
   };
 
   const updateNotification = <K extends keyof EmailNotification>(
@@ -70,100 +96,181 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
     onChange(updated);
   };
 
-  const addRecipient = (index: number) => {
-    const updated = [...notifications];
-    updated[index] = {
-      ...updated[index],
-      to: [...updated[index].to, ''],
-    };
-    onChange(updated);
+  const getRecipients = (notification: EmailNotification, field: RecipientField): string[] => {
+    if (field === 'to') return notification.to;
+    return notification[field] ?? [];
   };
 
-  const updateRecipient = (notifIndex: number, recipientIndex: number, value: string) => {
-    const updated = [...notifications];
-    const newTo = [...updated[notifIndex].to];
-    newTo[recipientIndex] = value;
-    updated[notifIndex] = { ...updated[notifIndex], to: newTo };
-    onChange(updated);
-
-    const errorKey = `${notifIndex}-to-${recipientIndex}`;
-    if (value && !isValidEmail(value)) {
-      setValidationErrors((prev) => ({ ...prev, [errorKey]: 'Invalid email format' }));
-    } else {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[errorKey];
-        return newErrors;
-      });
-    }
+  const addRecipient = (index: number, field: RecipientField) => {
+    const current = getRecipients(notifications[index], field);
+    updateNotification(index, field, [...current, '']);
   };
 
-  const removeRecipient = (notifIndex: number, recipientIndex: number) => {
-    const updated = [...notifications];
-    const newTo = [...updated[notifIndex].to];
-    newTo.splice(recipientIndex, 1);
-    updated[notifIndex] = { ...updated[notifIndex], to: newTo };
-    onChange(updated);
+  const updateRecipient = (
+    notifIndex: number,
+    field: RecipientField,
+    recipientIndex: number,
+    value: string
+  ) => {
+    const current = [...getRecipients(notifications[notifIndex], field)];
+    current[recipientIndex] = value;
+    updateNotification(notifIndex, field, current);
 
-    const errorKey = `${notifIndex}-to-${recipientIndex}`;
-    setValidationErrors((prev) => {
-      const newErrors = { ...prev };
-      delete newErrors[errorKey];
-      return newErrors;
-    });
+    const errorKey = `${notifIndex}-${field}-${recipientIndex}`;
+    setError(errorKey, value && !isValidEmail(value) ? invalidEmailMessage : null);
+  };
+
+  const removeRecipient = (notifIndex: number, field: RecipientField, recipientIndex: number) => {
+    const current = [...getRecipients(notifications[notifIndex], field)];
+    current.splice(recipientIndex, 1);
+    updateNotification(notifIndex, field, field === 'to' && current.length === 0 ? [''] : current);
+
+    const errorKey = `${notifIndex}-${field}-${recipientIndex}`;
+    setError(errorKey, null);
   };
 
   const handleReplyToChange = (index: number, value: string) => {
     updateNotification(index, 'replyTo', value || undefined);
-
     const errorKey = `${index}-replyTo`;
-    if (value && !isValidEmail(value)) {
-      setValidationErrors((prev) => ({ ...prev, [errorKey]: 'Invalid email format' }));
-    } else {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[errorKey];
-        return newErrors;
-      });
-    }
+    setError(errorKey, value && !isValidEmail(value) ? invalidEmailMessage : null);
+  };
+
+  const recipientLabels: Record<RecipientField, { id: string; defaultMessage: string }> = {
+    to: { id: getTranslation('notifications.email.to.label'), defaultMessage: 'To' },
+    cc: { id: getTranslation('notifications.email.cc.label'), defaultMessage: 'Cc' },
+    bcc: { id: getTranslation('notifications.email.bcc.label'), defaultMessage: 'Bcc' },
+  };
+
+  const renderRecipientEditor = (
+    notification: EmailNotification,
+    index: number,
+    field: RecipientField
+  ) => {
+    const recipients = getRecipients(notification, field);
+    const isRequired = field === 'to';
+
+    return (
+      <Box key={field}>
+        <Flex justifyContent="space-between" alignItems="center" marginBottom={2}>
+          <Typography variant="sigma" textColor="neutral600">
+            {formatMessage(recipientLabels[field])}
+          </Typography>
+          <Button
+            size="S"
+            variant="secondary"
+            startIcon={<Plus />}
+            onClick={() => addRecipient(index, field)}
+          >
+            {formatMessage({
+              id: getTranslation('notifications.email.addRecipient'),
+              defaultMessage: 'Add recipient',
+            })}
+          </Button>
+        </Flex>
+        {recipients.length === 0 ? (
+          <Typography variant="pi" textColor="neutral500">
+            {formatMessage({
+              id: getTranslation('notifications.email.noRecipients'),
+              defaultMessage: 'No recipients added',
+            })}
+          </Typography>
+        ) : (
+          <Flex direction="column" gap={2} alignItems="stretch">
+            {recipients.map((email, recipientIndex) => {
+              const errorKey = `${index}-${field}-${recipientIndex}`;
+              const error = validationErrors[errorKey];
+              return (
+                <Flex key={recipientIndex} gap={2} alignItems="flex-start">
+                  <Box flex="1">
+                    <Field.Root name={errorKey} error={error || false}>
+                      <TextInput
+                        type="email"
+                        aria-label={`${formatMessage(recipientLabels[field])} ${recipientIndex + 1}`}
+                        placeholder={formatMessage({
+                          id: getTranslation('notifications.email.to.placeholder'),
+                          defaultMessage: 'recipient@example.com',
+                        })}
+                        value={email}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          updateRecipient(index, field, recipientIndex, e.target.value)
+                        }
+                      />
+                      <Field.Error />
+                    </Field.Root>
+                  </Box>
+                  <IconButton
+                    label={formatMessage({
+                      id: getTranslation('notifications.email.removeRecipient'),
+                      defaultMessage: 'Remove recipient',
+                    })}
+                    onClick={() => removeRecipient(index, field, recipientIndex)}
+                    disabled={isRequired && recipients.length === 1}
+                    variant="ghost"
+                    withTooltip={false}
+                  >
+                    <Trash />
+                  </IconButton>
+                </Flex>
+              );
+            })}
+          </Flex>
+        )}
+      </Box>
+    );
   };
 
   return (
-    <Flex direction="column" gap={4} width="100%">
+    <Flex direction="column" gap={4} alignItems="stretch">
       {/* Header */}
-      <Flex justifyContent="space-between" alignItems="center" width="100%">
+      <Flex justifyContent="space-between" alignItems="center">
         <Box>
           <Typography variant="delta" fontWeight="bold">
-            Email Notifications
+            {formatMessage({
+              id: getTranslation('notifications.email.title'),
+              defaultMessage: 'Email Notifications',
+            })}
           </Typography>
-          <Typography variant="pi" textColor="neutral600">
-            Send email notifications when forms are submitted
-          </Typography>
+          <Box>
+            <Typography variant="pi" textColor="neutral600">
+              {formatMessage({
+                id: getTranslation('notifications.email.subtitle'),
+                defaultMessage: 'Send an email when a new submission is received',
+              })}
+            </Typography>
+          </Box>
         </Box>
         <Button size="S" startIcon={<Plus />} onClick={addNotification}>
-          Add Notification
+          {formatMessage({
+            id: getTranslation('notifications.email.add'),
+            defaultMessage: 'Add email notification',
+          })}
         </Button>
       </Flex>
 
       {/* Empty State */}
       {notifications.length === 0 ? (
-        <Box padding={6} background="neutral100" hasRadius width="100%">
-          <Typography textColor="neutral600" style={{ textAlign: 'center', display: 'block' }}>
-            No email notifications configured. Click &quot;Add Notification&quot; to create one.
-          </Typography>
+        <Box padding={6} background="neutral100" hasRadius>
+          <Flex justifyContent="center">
+            <Typography textColor="neutral600">
+              {formatMessage({
+                id: getTranslation('notifications.email.empty'),
+                defaultMessage: 'No email notifications configured',
+              })}
+            </Typography>
+          </Flex>
         </Box>
       ) : (
-        <Flex direction="column" gap={4} width="100%">
+        <Flex direction="column" gap={4} alignItems="stretch">
           {notifications.map((notification, index) => (
             <Box
               key={index}
               padding={4}
-              background="neutral100"
+              background="neutral0"
               hasRadius
+              shadow="tableShadow"
               borderColor="neutral200"
               borderStyle="solid"
               borderWidth="1px"
-              width="100%"
             >
               {/* Notification Header */}
               <Flex justifyContent="space-between" alignItems="flex-start" marginBottom={4}>
@@ -174,17 +281,29 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                   }
                 >
                   <Typography fontWeight="bold">
-                    Notification #{index + 1}
+                    {formatMessage(
+                      {
+                        id: getTranslation('notifications.email.itemTitle'),
+                        defaultMessage: 'Notification #{number}',
+                      },
+                      { number: index + 1 }
+                    )}
                     {!notification.enabled && (
-                      <Typography as="span" variant="pi" textColor="neutral500">
+                      <Typography tag="span" variant="pi" textColor="neutral500">
                         {' '}
-                        (Disabled)
+                        {formatMessage({
+                          id: getTranslation('common.disabled'),
+                          defaultMessage: '(Disabled)',
+                        })}
                       </Typography>
                     )}
                   </Typography>
                 </Checkbox>
                 <IconButton
-                  label="Remove notification"
+                  label={formatMessage({
+                    id: getTranslation('notifications.email.remove'),
+                    defaultMessage: 'Remove notification',
+                  })}
                   onClick={() => removeNotification(index)}
                   variant="ghost"
                   withTooltip={false}
@@ -193,70 +312,40 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                 </IconButton>
               </Flex>
 
-              <Flex direction="column" gap={4} width="100%">
-                {/* Recipients */}
-                <Box width="100%">
-                  <Flex justifyContent="space-between" alignItems="center" marginBottom={2}>
-                    <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
-                      Recipients (To)
-                    </Typography>
-                    <Button size="S" variant="secondary" onClick={() => addRecipient(index)}>
-                      Add Recipient
-                    </Button>
-                  </Flex>
-                  <Flex direction="column" gap={2} width="100%">
-                    {notification.to.map((email, recipientIndex) => {
-                      const errorKey = `${index}-to-${recipientIndex}`;
-                      const hasError = !!validationErrors[errorKey];
-                      return (
-                        <Flex key={recipientIndex} gap={2} alignItems="flex-start" width="100%">
-                          <Box flex="1">
-                            <TextInput
-                              type="email"
-                              placeholder="email@example.com"
-                              value={email}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                updateRecipient(index, recipientIndex, e.target.value)
-                              }
-                              hasError={hasError}
-                            />
-                            {hasError && (
-                              <Typography variant="pi" textColor="danger600">
-                                {validationErrors[errorKey]}
-                              </Typography>
-                            )}
-                          </Box>
-                          <IconButton
-                            label="Remove recipient"
-                            onClick={() => removeRecipient(index, recipientIndex)}
-                            disabled={notification.to.length === 1}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Trash />
-                          </IconButton>
-                        </Flex>
-                      );
-                    })}
-                  </Flex>
-                </Box>
+              <Flex direction="column" gap={4} alignItems="stretch">
+                {/* Recipients: To / Cc / Bcc */}
+                {renderRecipientEditor(notification, index, 'to')}
+                {renderRecipientEditor(notification, index, 'cc')}
+                {renderRecipientEditor(notification, index, 'bcc')}
 
                 <Divider />
 
                 {/* Subject and Reply-To Row */}
-                <Flex gap={6} width="100%">
+                <Flex gap={6} alignItems="flex-start">
                   <Box flex="1">
                     <Field.Root name={`notification-${index}-subject`}>
-                      <Field.Label>Subject Line</Field.Label>
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('notifications.email.subject.label'),
+                          defaultMessage: 'Subject',
+                        })}
+                      </Field.Label>
                       <TextInput
                         value={notification.subject}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           updateNotification(index, 'subject', e.target.value)
                         }
-                        placeholder="New submission from {{form.title}}"
+                        placeholder={formatMessage({
+                          id: getTranslation('notifications.email.subject.placeholder'),
+                          defaultMessage: 'New form submission',
+                        })}
                       />
                       <Field.Hint>
-                        Use {'{{form.title}}'}, {'{{field.fieldName}}'} for dynamic values
+                        {formatMessage({
+                          id: getTranslation('notifications.email.subject.hint'),
+                          defaultMessage:
+                            'Use {{form.title}} and {{field.name}} for dynamic values',
+                        })}
                       </Field.Hint>
                     </Field.Root>
                   </Box>
@@ -264,18 +353,28 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                   <Box flex="1">
                     <Field.Root
                       name={`notification-${index}-replyTo`}
-                      error={validationErrors[`${index}-replyTo`]}
+                      error={validationErrors[`${index}-replyTo`] || false}
                     >
-                      <Field.Label>Reply-To (Optional)</Field.Label>
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('notifications.email.replyTo.label'),
+                          defaultMessage: 'Reply-To',
+                        })}
+                      </Field.Label>
                       <TextInput
                         value={notification.replyTo || ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           handleReplyToChange(index, e.target.value)
                         }
-                        placeholder="{{field.email}} or noreply@example.com"
-                        hasError={!!validationErrors[`${index}-replyTo`]}
+                        placeholder="{{field.email}}"
                       />
-                      <Field.Hint>Use {'{{field.email}}'} for submitter&apos;s email</Field.Hint>
+                      <Field.Hint>
+                        {formatMessage({
+                          id: getTranslation('notifications.email.replyTo.hint'),
+                          defaultMessage: "Use {{field.email}} for the submitter's email",
+                        })}
+                      </Field.Hint>
+                      <Field.Error />
                     </Field.Root>
                   </Box>
                 </Flex>
@@ -289,7 +388,10 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                     updateNotification(index, 'includeData', checked)
                   }
                 >
-                  Include submitted data in email
+                  {formatMessage({
+                    id: getTranslation('notifications.email.includeData.label'),
+                    defaultMessage: 'Include submission data',
+                  })}
                 </Checkbox>
               </Flex>
             </Box>
@@ -298,12 +400,23 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
       )}
 
       {/* Requirements Note */}
-      <Box padding={4} background="neutral100" hasRadius width="100%">
+      <Box padding={4} background="neutral100" hasRadius>
         <Typography variant="pi" textColor="neutral600">
-          <strong>Note:</strong> Email notifications require the Strapi Email plugin to be installed
-          and configured.
+          <Typography tag="span" variant="pi" fontWeight="bold" textColor="neutral700">
+            {formatMessage({
+              id: getTranslation('common.note'),
+              defaultMessage: 'Note:',
+            })}
+          </Typography>{' '}
+          {formatMessage({
+            id: getTranslation('notifications.email.requirement'),
+            defaultMessage:
+              'Email notifications require the Strapi Email plugin to be installed and configured.',
+          })}
         </Typography>
       </Box>
     </Flex>
   );
 };
+
+export default EmailSettings;
