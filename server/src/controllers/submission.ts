@@ -115,9 +115,10 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         return ctx.notFound('Submission not found');
       }
 
-      // Auto-mark as read when viewing a new submission
+      // Auto-mark as read when viewing a new submission. This is a system-driven
+      // change (not an admin action), so suppress the submission.updated webhook.
       if (submission.status === 'new') {
-        await submissionService.markAsRead(id);
+        await submissionService.markAsRead(id, { triggerWebhooks: false });
         submission.status = 'read';
       }
 

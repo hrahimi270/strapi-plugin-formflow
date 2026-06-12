@@ -176,17 +176,6 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
             },
           };
         }
-
-        if (error.message === 'Spam detected') {
-          // Return success to prevent spam bots from knowing they were caught
-          // but don't actually store the submission
-          return {
-            data: {
-              success: true,
-              message: 'Thank you for your submission',
-            },
-          };
-        }
       }
 
       // Log and throw generic error for unexpected issues

@@ -59,14 +59,6 @@ export interface SubmissionResult {
 }
 
 /**
- * Spam submission result (silently rejected)
- */
-export interface SpamSubmissionResult {
-  successMessage?: string;
-  redirectUrl?: string;
-}
-
-/**
  * Custom validation error with field-level details
  */
 class ValidationError extends Error {
@@ -134,7 +126,7 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     slug: string,
     data: Record<string, unknown>,
     metadata: SubmissionMetadata
-  ): Promise<SubmissionResult | SpamSubmissionResult> {
+  ): Promise<SubmissionResult> {
     const formService = strapi.plugin('strapi-forms').service('form');
     const validationService = strapi.plugin('strapi-forms').service('validation');
 
@@ -152,21 +144,11 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     // Create a mutable copy of submission data
     const submissionData = { ...data };
 
-    // Check honeypot spam filter
+    // Spam handling (honeypot + reCAPTCHA) lives in the spam-check middleware,
+    // which runs before this controller/service. Defensively strip the honeypot
+    // field here so it never reaches validation or storage.
     if (form.settings?.spam?.honeypot) {
       const honeypotFieldName = form.settings.spam.honeypotFieldName || '_gotcha';
-
-      if (validationService.isSpam(submissionData, honeypotFieldName)) {
-        // Log spam attempt but return success to avoid detection
-        strapi.log.info(`[Strapi Forms] Spam submission detected for form: ${slug}`);
-
-        return {
-          successMessage: form.successMessage || 'Thank you for your submission',
-          redirectUrl: form.redirectUrl,
-        };
-      }
-
-      // Remove honeypot field from data before processing
       delete submissionData[honeypotFieldName];
     }
 
@@ -249,6 +231,9 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
    * Update a submission record
    *
+   * When a submission's status or data changes, fires the `submission.updated`
+   * webhook event (in the background) for any webhook subscribed to it.
+   *
    * @param documentId - Submission documentId
    * @param data - Fields to update
    * @returns Updated submission record
@@ -259,14 +244,85 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       status: SubmissionStatus;
       data: Record<string, unknown>;
       metadata: Partial<SubmissionMetadata>;
-    }>
+    }>,
+    options: { triggerWebhooks?: boolean } = {}
   ): Promise<FormSubmission> {
-    const result = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
+    const { triggerWebhooks = true } = options;
+
+    const result = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
       documentId,
       data: data as Record<string, unknown>,
-    });
+      populate: ['form'],
+    })) as unknown as FormSubmission;
 
-    return result as unknown as FormSubmission;
+    // Fire the submission.updated webhook event in the background.
+    // Don't block the update response on webhook delivery. System-driven
+    // updates (e.g. auto-mark-as-read on first view) pass triggerWebhooks:false
+    // so merely opening a submission does not emit a webhook.
+    if (triggerWebhooks) {
+      this.triggerUpdateWebhooks(result, data).catch((error: Error) => {
+        strapi.log.error('[Strapi Forms] submission.updated webhook error:', error);
+      });
+    }
+
+    return result;
+  },
+
+  /**
+   * Trigger `submission.updated` webhooks for an updated submission.
+   *
+   * Loads the parent form (with settings) and dispatches to any webhook whose
+   * events include `submission.updated`.
+   *
+   * @param submission - The updated submission record (populated with form)
+   * @param changed - The fields that were updated (forwarded as webhook data)
+   */
+  async triggerUpdateWebhooks(
+    submission: FormSubmission,
+    changed: Record<string, unknown>
+  ): Promise<void> {
+    const formRef = submission.form as { documentId?: string } | undefined;
+    if (!formRef?.documentId) {
+      return;
+    }
+
+    const formService = strapi.plugin('strapi-forms').service('form');
+    const form = (await formService.findOne(formRef.documentId)) as SubmittableForm | null;
+
+    const webhooks = form?.settings?.webhooks;
+    if (!webhooks?.length) {
+      return;
+    }
+
+    const webhookService = strapi.plugin('strapi-forms').service('webhook');
+
+    const webhookFormContext = {
+      documentId: form!.documentId,
+      title: form!.title,
+      slug: form!.slug,
+    };
+
+    const webhookSubmissionContext = {
+      documentId: submission.documentId,
+      status: submission.status,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
+    };
+
+    // The webhook payload data is the submission's current data when available,
+    // otherwise the changed fields.
+    const payloadData =
+      submission.data && typeof submission.data === 'object'
+        ? submission.data
+        : (changed.data as Record<string, unknown> | undefined);
+
+    await webhookService.triggerAll(
+      webhooks,
+      'submission.updated',
+      webhookFormContext,
+      webhookSubmissionContext,
+      payloadData
+    );
   },
 
   /**
@@ -347,8 +403,11 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * @param documentId - Submission documentId
    * @returns Updated submission record
    */
-  async markAsRead(documentId: string): Promise<FormSubmission> {
-    return this.update(documentId, { status: 'read' });
+  async markAsRead(
+    documentId: string,
+    options: { triggerWebhooks?: boolean } = {}
+  ): Promise<FormSubmission> {
+    return this.update(documentId, { status: 'read' }, options);
   },
 
   /**
@@ -468,59 +527,6 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
           );
         });
     }
-  },
-
-  /**
-   * Export submissions as CSV (placeholder for export service)
-   *
-   * @param formId - Form documentId
-   * @param filters - Optional filters
-   * @returns CSV string
-   */
-  async exportToCsv(formId: string, filters: Record<string, unknown> = {}): Promise<string> {
-    const submissions = await this.find(formId, { filters });
-
-    if (submissions.length === 0) {
-      return '';
-    }
-
-    // Get all unique field names from submissions
-    const fieldNames = new Set<string>();
-    for (const submission of submissions) {
-      if (submission.data && typeof submission.data === 'object') {
-        Object.keys(submission.data).forEach((key) => fieldNames.add(key));
-      }
-    }
-
-    const headers = ['Submission ID', 'Status', 'Submitted At', ...Array.from(fieldNames)];
-
-    // Build CSV rows
-    const rows = submissions.map((submission) => {
-      const values = [
-        submission.documentId,
-        submission.status,
-        submission.createdAt,
-        ...Array.from(fieldNames).map((field) => {
-          const value = (submission.data as Record<string, unknown>)?.[field];
-          if (value === null || value === undefined) return '';
-          if (Array.isArray(value)) return value.join('; ');
-          return String(value);
-        }),
-      ];
-
-      // Escape CSV values
-      return values
-        .map((v) => {
-          const str = String(v);
-          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-            return `"${str.replace(/"/g, '""')}"`;
-          }
-          return str;
-        })
-        .join(',');
-    });
-
-    return [headers.join(','), ...rows].join('\n');
   },
 });
 
