@@ -78,7 +78,13 @@ export const SpamSettings = ({ spam, onChange }: SpamSettingsProps) => {
 
       {spam.honeypot && (
         <Box maxWidth="40rem">
-          <Field.Root name="honeypotFieldName">
+          <Field.Root
+            name="honeypotFieldName"
+            hint={formatMessage({
+              id: getTranslation('settings.spam.honeypotFieldName.hint'),
+              defaultMessage: 'Name of the hidden honeypot field',
+            })}
+          >
             <Field.Label>
               {formatMessage({
                 id: getTranslation('settings.spam.honeypotFieldName.label'),
@@ -92,12 +98,7 @@ export const SpamSettings = ({ spam, onChange }: SpamSettingsProps) => {
                 updateSpam('honeypotFieldName', e.target.value)
               }
             />
-            <Field.Hint>
-              {formatMessage({
-                id: getTranslation('settings.spam.honeypotFieldName.hint'),
-                defaultMessage: 'Name of the hidden honeypot field',
-              })}
-            </Field.Hint>
+            <Field.Hint />
           </Field.Root>
         </Box>
       )}
@@ -163,7 +164,13 @@ export const SpamSettings = ({ spam, onChange }: SpamSettingsProps) => {
 
             {recaptcha.version === 'v3' && (
               <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
-                <Field.Root name="recaptchaThreshold">
+                <Field.Root
+                  name="recaptchaThreshold"
+                  hint={formatMessage({
+                    id: getTranslation('settings.spam.recaptcha.threshold.hint'),
+                    defaultMessage: 'Minimum score (0.0 - 1.0) required to accept a submission',
+                  })}
+                >
                   <Field.Label>
                     {formatMessage({
                       id: getTranslation('settings.spam.recaptcha.threshold.label'),
@@ -179,19 +186,19 @@ export const SpamSettings = ({ spam, onChange }: SpamSettingsProps) => {
                     min={0}
                     max={1}
                   />
-                  <Field.Hint>
-                    {formatMessage({
-                      id: getTranslation('settings.spam.recaptcha.threshold.hint'),
-                      defaultMessage:
-                        'Minimum score (0.0 - 1.0) required to accept a submission',
-                    })}
-                  </Field.Hint>
+                  <Field.Hint />
                 </Field.Root>
               </Grid.Item>
             )}
 
             <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
-              <Field.Root name="recaptchaSiteKey">
+              <Field.Root
+                name="recaptchaSiteKey"
+                hint={formatMessage({
+                  id: getTranslation('settings.spam.recaptcha.siteKey.hint'),
+                  defaultMessage: 'Public key embedded in the form on the frontend',
+                })}
+              >
                 <Field.Label>
                   {formatMessage({
                     id: getTranslation('settings.spam.recaptcha.siteKey.label'),
@@ -205,17 +212,19 @@ export const SpamSettings = ({ spam, onChange }: SpamSettingsProps) => {
                   }
                   placeholder="6Lc..."
                 />
-                <Field.Hint>
-                  {formatMessage({
-                    id: getTranslation('settings.spam.recaptcha.siteKey.hint'),
-                    defaultMessage: 'Public key embedded in the form on the frontend',
-                  })}
-                </Field.Hint>
+                <Field.Hint />
               </Field.Root>
             </Grid.Item>
 
             <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
-              <Field.Root name="recaptchaSecretKey">
+              <Field.Root
+                name="recaptchaSecretKey"
+                hint={formatMessage({
+                  id: getTranslation('settings.spam.recaptcha.secretKey.hint'),
+                  defaultMessage:
+                    'Stored server-side and never exposed publicly. Used to verify tokens with Google.',
+                })}
+              >
                 <Field.Label>
                   {formatMessage({
                     id: getTranslation('settings.spam.recaptcha.secretKey.label'),
@@ -231,13 +240,7 @@ export const SpamSettings = ({ spam, onChange }: SpamSettingsProps) => {
                   placeholder="6Lc..."
                   autoComplete="new-password"
                 />
-                <Field.Hint>
-                  {formatMessage({
-                    id: getTranslation('settings.spam.recaptcha.secretKey.hint'),
-                    defaultMessage:
-                      'Stored server-side and never exposed publicly. Used to verify tokens with Google.',
-                  })}
-                </Field.Hint>
+                <Field.Hint />
               </Field.Root>
             </Grid.Item>
           </Grid.Root>

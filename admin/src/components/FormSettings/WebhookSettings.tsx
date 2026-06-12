@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Flex,
@@ -14,6 +14,7 @@ import {
 } from '@strapi/design-system';
 import { Plus, Trash, Eye, EyeStriked } from '@strapi/icons';
 import { useIntl } from 'react-intl';
+import { v4 as uuidv4 } from 'uuid';
 import styled from 'styled-components';
 
 import { getTranslation } from '../../utils/getTranslation';
@@ -23,6 +24,14 @@ export interface WebhookSettingsProps {
   webhooks: WebhookConfig[];
   onChange: (webhooks: WebhookConfig[]) => void;
 }
+
+/**
+ * Webhook record with a stable client-side id. The `id` is used to key cards and
+ * editor-local state so that splicing the array never aliases neighbours' state.
+ * `id` is treated as optional on the wire (the api.ts type owns the shape); the
+ * server tolerates the extra key.
+ */
+type WebhookWithId = WebhookConfig & { id: string };
 
 /** A single editable header row (kept in component state, serialised to the record). */
 interface HeaderRow {
@@ -71,13 +80,30 @@ const AVAILABLE_EVENTS: Array<{
 /**
  * Default webhook configuration
  */
-const createDefaultWebhook = (): WebhookConfig => ({
+const createDefaultWebhook = (): WebhookWithId => ({
+  id: uuidv4(),
   enabled: true,
   url: '',
   method: 'POST',
   events: ['submission.created'],
   includeFormData: true,
 });
+
+/**
+ * Ensure every webhook has a stable `id`. Existing records persisted before the
+ * `id` field was introduced are normalised on first render.
+ */
+const withIds = (webhooks: WebhookConfig[]): WebhookWithId[] =>
+  webhooks.map((webhook) => {
+    const existing = (webhook as Partial<WebhookWithId>).id;
+    return existing ? (webhook as WebhookWithId) : { ...webhook, id: uuidv4() };
+  });
+
+/**
+ * Whether any webhook is missing an `id` (i.e. needs normalising on mount).
+ */
+const needsIds = (webhooks: WebhookConfig[]): boolean =>
+  webhooks.some((webhook) => !(webhook as Partial<WebhookWithId>).id);
 
 /**
  * Validate URL format
@@ -132,36 +158,53 @@ const EXAMPLE_PAYLOAD = {
  */
 export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) => {
   const { formatMessage } = useIntl();
-  const [showSecrets, setShowSecrets] = useState<Record<number, boolean>>({});
-  const [urlErrors, setUrlErrors] = useState<Record<number, string>>({});
+  // Editor-local state keyed by the webhook's stable id (never by array index).
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [urlErrors, setUrlErrors] = useState<Record<string, string>>({});
   // Header rows kept locally so partially-typed rows (empty key) survive edits.
-  const [headerRows, setHeaderRows] = useState<Record<number, HeaderRow[]>>({});
+  const [headerRows, setHeaderRows] = useState<Record<string, HeaderRow[]>>({});
+
+  // Normalise to records that always carry a stable id for keying.
+  const items = useMemo<WebhookWithId[]>(() => withIds(webhooks), [webhooks]);
+
+  // Persist generated ids back to the parent when existing records lack them.
+  useEffect(() => {
+    if (needsIds(webhooks)) {
+      onChange(items);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [webhooks]);
 
   const invalidUrlMessage = formatMessage({
     id: getTranslation('notifications.webhook.url.invalid'),
     defaultMessage: 'Please enter a valid URL (http or https)',
   });
 
-  const getHeaderRows = (index: number): HeaderRow[] =>
-    headerRows[index] ?? headersToRows(webhooks[index]?.headers);
+  const getHeaderRows = (id: string, index: number): HeaderRow[] =>
+    headerRows[id] ?? headersToRows(items[index]?.headers);
 
   const addWebhook = () => {
-    onChange([...webhooks, createDefaultWebhook()]);
+    onChange([...items, createDefaultWebhook()]);
   };
 
-  const removeWebhook = (index: number) => {
-    const updated = [...webhooks];
+  const removeWebhook = (id: string, index: number) => {
+    const updated = [...items];
     updated.splice(index, 1);
     onChange(updated);
 
     setUrlErrors((prev) => {
       const next = { ...prev };
-      delete next[index];
+      delete next[id];
       return next;
     });
     setHeaderRows((prev) => {
       const next = { ...prev };
-      delete next[index];
+      delete next[id];
+      return next;
+    });
+    setShowSecrets((prev) => {
+      const next = { ...prev };
+      delete next[id];
       return next;
     });
   };
@@ -171,45 +214,52 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
     key: K,
     value: WebhookConfig[K]
   ) => {
-    const updated = [...webhooks];
+    const updated = [...items];
     updated[index] = { ...updated[index], [key]: value };
     onChange(updated);
   };
 
-  const handleUrlChange = (index: number, value: string) => {
+  const handleUrlChange = (id: string, index: number, value: string) => {
     updateWebhook(index, 'url', value);
     setUrlErrors((prev) => {
       const next = { ...prev };
       if (value && !isValidUrl(value)) {
-        next[index] = invalidUrlMessage;
+        next[id] = invalidUrlMessage;
       } else {
-        delete next[index];
+        delete next[id];
       }
       return next;
     });
   };
 
-  const setRows = (index: number, rows: HeaderRow[]) => {
-    setHeaderRows((prev) => ({ ...prev, [index]: rows }));
+  const setRows = (id: string, index: number, rows: HeaderRow[]) => {
+    setHeaderRows((prev) => ({ ...prev, [id]: rows }));
     updateWebhook(index, 'headers', rowsToHeaders(rows));
   };
 
-  const addHeader = (index: number) => {
-    setRows(index, [...getHeaderRows(index), { key: '', value: '' }]);
+  const addHeader = (id: string, index: number) => {
+    setRows(id, index, [...getHeaderRows(id, index), { key: '', value: '' }]);
   };
 
-  const updateHeader = (index: number, rowIndex: number, patch: Partial<HeaderRow>) => {
-    const rows = getHeaderRows(index).map((row, i) => (i === rowIndex ? { ...row, ...patch } : row));
-    setRows(index, rows);
+  const updateHeader = (
+    id: string,
+    index: number,
+    rowIndex: number,
+    patch: Partial<HeaderRow>
+  ) => {
+    const rows = getHeaderRows(id, index).map((row, i) =>
+      i === rowIndex ? { ...row, ...patch } : row
+    );
+    setRows(id, index, rows);
   };
 
-  const removeHeader = (index: number, rowIndex: number) => {
-    const rows = getHeaderRows(index).filter((_, i) => i !== rowIndex);
-    setRows(index, rows.length > 0 ? rows : [{ key: '', value: '' }]);
+  const removeHeader = (id: string, index: number, rowIndex: number) => {
+    const rows = getHeaderRows(id, index).filter((_, i) => i !== rowIndex);
+    setRows(id, index, rows.length > 0 ? rows : [{ key: '', value: '' }]);
   };
 
   const toggleEvent = (index: number, event: WebhookEvent) => {
-    const events = webhooks[index].events || [];
+    const events = items[index].events || [];
     if (events.includes(event)) {
       if (events.length > 1) {
         updateWebhook(
@@ -223,8 +273,8 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
     }
   };
 
-  const toggleSecretVisibility = (index: number) => {
-    setShowSecrets((prev) => ({ ...prev, [index]: !prev[index] }));
+  const toggleSecretVisibility = (id: string) => {
+    setShowSecrets((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   return (
@@ -256,7 +306,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
       </Flex>
 
       {/* Empty State */}
-      {webhooks.length === 0 ? (
+      {items.length === 0 ? (
         <Box padding={6} background="neutral100" hasRadius>
           <Flex justifyContent="center">
             <Typography textColor="neutral600">
@@ -269,9 +319,11 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
         </Box>
       ) : (
         <Flex direction="column" gap={4} alignItems="stretch">
-          {webhooks.map((webhook, index) => (
+          {items.map((webhook, index) => {
+            const webhookId = webhook.id;
+            return (
             <Box
-              key={index}
+              key={webhookId}
               padding={4}
               background="neutral0"
               hasRadius
@@ -310,7 +362,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                     id: getTranslation('notifications.webhook.remove'),
                     defaultMessage: 'Remove webhook',
                   })}
-                  onClick={() => removeWebhook(index)}
+                  onClick={() => removeWebhook(webhookId, index)}
                   variant="ghost"
                   withTooltip={false}
                 >
@@ -322,7 +374,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                 {/* URL and Method */}
                 <Flex gap={6} alignItems="flex-start">
                   <Box width="14rem">
-                    <Field.Root name={`webhook-${index}-method`}>
+                    <Field.Root name={`webhook-${webhookId}-method`}>
                       <Field.Label>
                         {formatMessage({
                           id: getTranslation('notifications.webhook.method.label'),
@@ -341,7 +393,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                     </Field.Root>
                   </Box>
                   <Box flex="1">
-                    <Field.Root name={`webhook-${index}-url`} error={urlErrors[index] || false}>
+                    <Field.Root name={`webhook-${webhookId}-url`} error={urlErrors[webhookId] || false}>
                       <Field.Label>
                         {formatMessage({
                           id: getTranslation('notifications.webhook.url.label'),
@@ -352,7 +404,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                         type="url"
                         value={webhook.url}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleUrlChange(index, e.target.value)
+                          handleUrlChange(webhookId, index, e.target.value)
                         }
                         placeholder={formatMessage({
                           id: getTranslation('notifications.webhook.url.placeholder'),
@@ -408,7 +460,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                       size="S"
                       variant="secondary"
                       startIcon={<Plus />}
-                      onClick={() => addHeader(index)}
+                      onClick={() => addHeader(webhookId, index)}
                     >
                       {formatMessage({
                         id: getTranslation('notifications.webhook.headers.add'),
@@ -417,10 +469,10 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                     </Button>
                   </Flex>
                   <Flex direction="column" gap={2} alignItems="stretch">
-                    {getHeaderRows(index).map((row, rowIndex) => (
+                    {getHeaderRows(webhookId, index).map((row, rowIndex) => (
                       <Flex key={rowIndex} gap={2} alignItems="flex-start">
                         <Box flex="1">
-                          <Field.Root name={`webhook-${index}-header-key-${rowIndex}`}>
+                          <Field.Root name={`webhook-${webhookId}-header-key-${rowIndex}`}>
                             <TextInput
                               aria-label={formatMessage({
                                 id: getTranslation('notifications.webhook.headers.key'),
@@ -432,13 +484,13 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                               })}
                               value={row.key}
                               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                updateHeader(index, rowIndex, { key: e.target.value })
+                                updateHeader(webhookId, index, rowIndex, { key: e.target.value })
                               }
                             />
                           </Field.Root>
                         </Box>
                         <Box flex="1">
-                          <Field.Root name={`webhook-${index}-header-value-${rowIndex}`}>
+                          <Field.Root name={`webhook-${webhookId}-header-value-${rowIndex}`}>
                             <TextInput
                               aria-label={formatMessage({
                                 id: getTranslation('notifications.webhook.headers.value'),
@@ -450,7 +502,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                               })}
                               value={row.value}
                               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                updateHeader(index, rowIndex, { value: e.target.value })
+                                updateHeader(webhookId, index, rowIndex, { value: e.target.value })
                               }
                             />
                           </Field.Root>
@@ -460,7 +512,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                             id: getTranslation('notifications.webhook.headers.remove'),
                             defaultMessage: 'Remove header',
                           })}
-                          onClick={() => removeHeader(index, rowIndex)}
+                          onClick={() => removeHeader(webhookId, index, rowIndex)}
                           variant="ghost"
                           withTooltip={false}
                         >
@@ -474,7 +526,14 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                 <Divider />
 
                 {/* Secret */}
-                <Field.Root name={`webhook-${index}-secret`}>
+                <Field.Root
+                  name={`webhook-${webhookId}-secret`}
+                  hint={formatMessage({
+                    id: getTranslation('notifications.webhook.secret.hint'),
+                    defaultMessage:
+                      'If provided, requests include an X-Webhook-Signature header for verification',
+                  })}
+                >
                   <Field.Label>
                     {formatMessage({
                       id: getTranslation('notifications.webhook.secret.label'),
@@ -484,7 +543,7 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                   <Flex gap={2} alignItems="flex-start">
                     <Box flex="1">
                       <TextInput
-                        type={showSecrets[index] ? 'text' : 'password'}
+                        type={showSecrets[webhookId] ? 'text' : 'password'}
                         value={webhook.secret || ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           updateWebhook(index, 'secret', e.target.value || undefined)
@@ -501,19 +560,13 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                         id: getTranslation('notifications.webhook.secret.toggle'),
                         defaultMessage: 'Toggle secret visibility',
                       })}
-                      onClick={() => toggleSecretVisibility(index)}
+                      onClick={() => toggleSecretVisibility(webhookId)}
                       variant="tertiary"
                     >
-                      {showSecrets[index] ? <EyeStriked /> : <Eye />}
+                      {showSecrets[webhookId] ? <EyeStriked /> : <Eye />}
                     </IconButton>
                   </Flex>
-                  <Field.Hint>
-                    {formatMessage({
-                      id: getTranslation('notifications.webhook.secret.hint'),
-                      defaultMessage:
-                        'If provided, requests include an X-Webhook-Signature header for verification',
-                    })}
-                  </Field.Hint>
+                  <Field.Hint />
                 </Field.Root>
 
                 <Divider />
@@ -532,7 +585,8 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                 </Checkbox>
               </Flex>
             </Box>
-          ))}
+            );
+          })}
         </Flex>
       )}
 

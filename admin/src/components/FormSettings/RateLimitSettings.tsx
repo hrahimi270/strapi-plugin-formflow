@@ -79,7 +79,13 @@ export const RateLimitSettings = ({ rateLimit, onChange }: RateLimitSettingsProp
         >
           <Grid.Root gap={4} gridCols={12}>
             <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
-              <Field.Root name="maxSubmissions">
+              <Field.Root
+                name="maxSubmissions"
+                hint={formatMessage({
+                  id: getTranslation('settings.rateLimit.maxSubmissions.hint'),
+                  defaultMessage: 'Maximum submissions allowed per time window',
+                })}
+              >
                 <Field.Label>
                   {formatMessage({
                     id: getTranslation('settings.rateLimit.maxSubmissions.label'),
@@ -94,17 +100,22 @@ export const RateLimitSettings = ({ rateLimit, onChange }: RateLimitSettingsProp
                   min={1}
                   step={1}
                 />
-                <Field.Hint>
-                  {formatMessage({
-                    id: getTranslation('settings.rateLimit.maxSubmissions.hint'),
-                    defaultMessage: 'Maximum submissions allowed per time window',
-                  })}
-                </Field.Hint>
+                <Field.Hint />
               </Field.Root>
             </Grid.Item>
 
             <Grid.Item col={6} xs={12} direction="column" alignItems="stretch">
-              <Field.Root name="windowMinutes">
+              <Field.Root
+                name="windowMinutes"
+                hint={formatMessage(
+                  {
+                    id: getTranslation('settings.rateLimit.window.hint'),
+                    defaultMessage:
+                      'Window length in minutes. Allows {max} submission(s) every {minutes} minute(s).',
+                  },
+                  { max: config.maxSubmissions, minutes: windowMinutes }
+                )}
+              >
                 <Field.Label>
                   {formatMessage({
                     id: getTranslation('settings.rateLimit.window.label'),
@@ -119,16 +130,7 @@ export const RateLimitSettings = ({ rateLimit, onChange }: RateLimitSettingsProp
                   min={1}
                   step={1}
                 />
-                <Field.Hint>
-                  {formatMessage(
-                    {
-                      id: getTranslation('settings.rateLimit.window.hint'),
-                      defaultMessage:
-                        'Window length in minutes. Allows {max} submission(s) every {minutes} minute(s).',
-                    },
-                    { max: config.maxSubmissions, minutes: windowMinutes }
-                  )}
-                </Field.Hint>
+                <Field.Hint />
               </Field.Root>
             </Grid.Item>
           </Grid.Root>
