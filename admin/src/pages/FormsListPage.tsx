@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Main,
   Box,
   Flex,
   Typography,
@@ -12,17 +11,27 @@ import {
   Tr,
   Th,
   Td,
-  IconButton,
-  Badge,
   Searchbar,
   Loader,
+  Link,
+  EmptyStateLayout,
 } from '@strapi/design-system';
-import { Plus, Pencil, Trash, Eye, Duplicate, File } from '@strapi/icons';
+import { Plus, Trash, Eye, Duplicate, Files, WarningCircle } from '@strapi/icons';
 import { Page, useNotification } from '@strapi/strapi/admin';
 
 import { useForms } from '../hooks';
-import { EmptyState, ConfirmDialog } from '../components/shared';
 import type { Form } from '../utils/api';
+import TooltipIconButton from '../components/shared/TooltipIconButton';
+import TableTypography from '../components/shared/TableTypography';
+import TableBadge from '../components/shared/TableBadge';
+import Heading from '../components/shared/Heading';
+import SubHeading from '../components/shared/SubHeading';
+import BackButton from '../components/shared/BackButton';
+import ConfirmDialog from '../components/shared/ConfirmDialog';
+import EmptyState from '../components/shared/EmptyState';
+import HeadingContainer from '../components/shared/HeadingContainer';
+import AddNewButton from '../components/shared/AddNewButton';
+import AddMoreButton from '../components/shared/AddMoreButton';
 
 /**
  * Forms List Page - Main landing page for the plugin
@@ -33,6 +42,12 @@ export const FormsListPage = () => {
   const { toggleNotification } = useNotification();
 
   const { forms, isLoading, error, refetch, deleteForm, duplicateForm } = useForms();
+  const numberOfForms = forms.length;
+
+  // Hard-coded data
+  const TABLE_HEADERS = ['Title', 'Slug', 'Submissions', 'Status', 'Actions'];
+  const ENTRY_SINGULAR = 'entry';
+  const ENTRY_PLURAL = 'entries';
 
   // Search state
   const [searchValue, setSearchValue] = useState('');
@@ -57,6 +72,10 @@ export const FormsListPage = () => {
         form.slug.toLowerCase().includes(searchLower)
     );
   }, [forms, searchValue]);
+
+  const handleBack = useCallback(() => {
+    navigate(`/`);
+  }, [navigate]);
 
   // Handle search input change
   const handleSearchChange = useCallback((value: string) => {
@@ -161,201 +180,199 @@ export const FormsListPage = () => {
         <Page.Title>Forms</Page.Title>
         <Box padding={8}>
           <EmptyState
-            title="Error loading forms"
-            description={error.message}
-            action={
-              <Button onClick={() => refetch()} variant="secondary">
-                Try again
-              </Button>
-            }
+            text="Error loading forms"
+            buttonText="Try again"
+            // description={error.message}
+            action={() => refetch()}
+            // action={
+            //   <Button onClick={() => refetch()} variant="secondary">
+            //     Try again
+            //   </Button>
+            // }
           />
         </Box>
       </Page.Main>
     );
   }
 
-  // Column count for table
-  const colCount = 5;
-  const rowCount = filteredForms.length;
-
   return (
-    <Main>
-      <Page.Title>Forms</Page.Title>
-
+    <Flex
+      paddingLeft="56px"
+      paddingRight="56px"
+      paddingTop="24px"
+      paddingBottom="24px"
+      direction="column"
+      gap="40px"
+    >
       {/* Header Section */}
-      <Box padding={8} background="neutral100">
-        <Flex justifyContent="space-between" alignItems="center">
-          <Box>
-            <Typography variant="alpha" as="h1">
-              Forms
-            </Typography>
-            <Typography variant="epsilon" textColor="neutral600">
-              Create and manage your forms
-            </Typography>
-          </Box>
-          <Button startIcon={<Plus />} onClick={handleCreateForm}>
-            Create Form
-          </Button>
-        </Flex>
-      </Box>
+      <Flex direction="column" width="100%" gap="12px">
+        <Box width="100%">
+          <BackButton action={handleBack} />
+        </Box>
+        <HeadingContainer>
+          <Flex justifyContent="space-between" alignItems="center" width="100%">
+            <Heading text="Forms" textColor="neutral800" />
+            <AddNewButton text="Create form" onClick={handleCreateForm} />
+          </Flex>
+          <SubHeading
+            text={`${numberOfForms} ${numberOfForms === 0 ? ENTRY_PLURAL : numberOfForms === 1 ? ENTRY_SINGULAR : ENTRY_PLURAL} found`}
+          />
+        </HeadingContainer>
+      </Flex>
 
       {/* Content Section */}
-      <Box padding={8}>
-        {/* Empty State */}
-        {forms.length === 0 ? (
-          <EmptyState
-            title="No forms yet"
-            description="Create your first form to start collecting submissions"
-            icon={<File width={40} height={40} />}
-            action={
-              <Button startIcon={<Plus />} onClick={handleCreateForm}>
-                Create your first form
-              </Button>
-            }
-          />
-        ) : (
-          <Flex direction="column" gap={4}>
-            {/* Search Bar */}
-            <Box maxWidth="320px">
-              <Searchbar
-                name="search"
-                placeholder="Search forms..."
-                value={searchValue}
-                onChange={handleSearchChange}
-                onClear={handleSearchClear}
-                clearLabel="Clear search"
-              >
-                Search
-              </Searchbar>
-            </Box>
+      {numberOfForms === 0 ? (
+        <>
+          <Box width="100%">
+            <EmptyStateLayout
+              action={
+                <Button
+                  onClick={handleCreateForm}
+                  variant="secondary" // color scheme
+                  height="3.2rem"
+                  startIcon={<Plus color="#271fe0" />}
+                >
+                  Create new form
+                </Button>
+              }
+              content="No forms yet"
+              icon={<Files color="#4945ff" width={96} height="auto" />}
+            />
+          </Box>
+          {/* Empty State */}
+          {/* <EmptyState
+            text="No forms yet"
+            buttonText="Create new form"
+            action={handleCreateForm}
+            shadow
+          /> */}
+        </>
+      ) : (
+        <Flex direction="column" gap="16px" alignItems="stretch" width="100%">
+          {/* Search Bar */}
+          <Flex>
+            <Searchbar
+              name="search"
+              placeholder="Search forms..."
+              value={searchValue}
+              onChange={handleSearchChange} // Fix it later!
+              onClear={handleSearchClear}
+              clearLabel="Clear search"
+            >
+              Search
+            </Searchbar>
+          </Flex>
 
-            {/* Forms Table */}
-            {filteredForms.length === 0 ? (
-              <EmptyState
-                title="No forms found"
-                description={`No forms match "${searchValue}"`}
-                action={
-                  <Button variant="secondary" onClick={handleSearchClear}>
-                    Clear search
-                  </Button>
-                }
-              />
-            ) : (
-              <Table
-                colCount={colCount}
-                rowCount={rowCount}
-                footer={
-                  <Box padding={4} background="neutral100">
-                    <Typography variant="pi" textColor="neutral600">
-                      Showing {filteredForms.length} of {forms.length} forms
-                    </Typography>
-                  </Box>
-                }
-              >
-                <Thead>
-                  <Tr>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Title
-                      </Typography>
+          {/* Forms Table */}
+          {filteredForms.length === 0 ? (
+            <EmptyState
+              text="No forms found"
+              buttonText="Clear search"
+              // description={`No forms match "${searchValue}"`}
+              action={handleSearchClear}
+              // action={
+              //   <Button variant="secondary" height="3.2rem" onClick={handleSearchClear}>
+              //     Clear search
+              //   </Button>
+              // }
+            />
+          ) : (
+            <Table
+              footer={
+                <>
+                  <AddMoreButton text="Add another form" onClick={handleCreateForm} />
+                  {/* Showing {filteredForms.length} of {forms.length} forms */}
+                </>
+              }
+            >
+              <Thead>
+                <Tr display="flex" width="100%">
+                  {TABLE_HEADERS.map((header) => (
+                    <Th key={header} flex="1" display="flex">
+                      <Flex width="100%" height="100%" alignItems="center">
+                        <Typography variant="sigma" textColor="neutral600">
+                          {header}
+                        </Typography>
+                      </Flex>
                     </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Slug
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Submissions
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Status
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Actions
-                      </Typography>
-                    </Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {filteredForms.map((form) => (
-                    <Tr key={form.documentId}>
-                      <Td>
-                        <Typography fontWeight="bold">{form.title}</Typography>
-                      </Td>
-                      <Td>
-                        <Typography textColor="neutral600">{form.slug}</Typography>
-                      </Td>
-                      <Td>
-                        <Badge>{form.submissionCount}</Badge>
-                      </Td>
-                      <Td>
-                        <Badge variant={form.isActive ? 'success' : 'secondary'}>
-                          {form.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </Td>
-                      <Td>
-                        <Flex gap={1}>
-                          <IconButton
-                            label="View submissions"
-                            onClick={() => handleViewSubmissions(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Eye />
-                          </IconButton>
-                          <IconButton
-                            label="Edit form"
-                            onClick={() => handleEditForm(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Pencil />
-                          </IconButton>
-                          <IconButton
-                            label="Duplicate form"
-                            onClick={() => handleDuplicateForm(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                            disabled={isDuplicating === form.documentId}
-                          >
-                            <Duplicate />
-                          </IconButton>
-                          <IconButton
-                            label="Delete form"
-                            onClick={() => handleDeleteClick(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Trash />
-                          </IconButton>
+                  ))}
+                </Tr>
+              </Thead>
+              <Tbody>
+                {filteredForms.map((form) => {
+                  const isActive = form.isActive;
+                  const formActions = [
+                    {
+                      label: 'View submissions',
+                      icon: <Eye />,
+                      handler: () => handleViewSubmissions(form),
+                    },
+                    {
+                      label: 'Duplicate form',
+                      icon: <Duplicate />,
+                      handler: () => handleDuplicateForm(form),
+                    },
+                    {
+                      label: 'Delete form',
+                      icon: <Trash />,
+                      handler: () => handleDeleteClick(form),
+                    },
+                  ];
+
+                  return (
+                    <Tr
+                      key={form.documentId}
+                      onClick={() => handleEditForm(form)}
+                      cursor="pointer"
+                      title="Edit form"
+                      display="flex"
+                      width="100%"
+                    >
+                      <TableTypography text={form.title} />
+                      <TableTypography text={form.slug} />
+                      <TableBadge text={`${form.submissionCount}`} badgeVariant="neutral" />
+                      <TableBadge
+                        text={isActive ? 'Active' : 'Inactive'}
+                        badgeVariant={isActive ? 'success' : 'danger'}
+                      />
+                      <Td flex="1">
+                        <Flex gap="4px">
+                          {formActions.map((formAction, index) => (
+                            <TooltipIconButton
+                              key={index}
+                              label={formAction.label}
+                              onClick={(event: MouseEvent) => {
+                                event.stopPropagation();
+                                formAction.handler();
+                              }}
+                            >
+                              {formAction.icon}
+                            </TooltipIconButton>
+                          ))}
                         </Flex>
                       </Td>
                     </Tr>
-                  ))}
-                </Tbody>
-              </Table>
-            )}
-          </Flex>
-        )}
-      </Box>
+                  );
+                })}
+              </Tbody>
+            </Table>
+          )}
+        </Flex>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         isOpen={deleteDialogOpen}
         onClose={handleDeleteCancel}
         onConfirm={handleDeleteConfirm}
-        title="Delete Form"
+        title="Delete Form Confirmation"
         message={`Are you sure you want to delete "${formToDelete?.title}"? This will also delete all associated submissions. This action cannot be undone.`}
-        confirmLabel="Delete"
+        confirmLabel="Confirm"
         cancelLabel="Cancel"
         variant="danger"
         isConfirming={isDeleting}
+        icon={<WarningCircle width={24} height={24} fill="danger600" />}
       />
-    </Main>
+    </Flex>
   );
 };
