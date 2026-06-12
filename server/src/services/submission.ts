@@ -45,7 +45,8 @@ export interface SubmissionQuery {
   filters?: Record<string, unknown>;
   sort?: Record<string, 'asc' | 'desc'> | string;
   limit?: number;
-  offset?: number;
+  // Document Service findMany uses offset-notation 'start' (not 'offset').
+  start?: number;
   populate?: string[];
 }
 
