@@ -1,8 +1,8 @@
-import { useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import type * as React from 'react';
+import { useState } from 'react';
+import { useNavigate, NavLink } from 'react-router-dom';
+import { useIntl } from 'react-intl';
 import {
-  Main,
-  Box,
   Flex,
   Typography,
   Button,
@@ -12,350 +12,362 @@ import {
   Tr,
   Th,
   Td,
+  TFooter,
   IconButton,
+  Status,
   Badge,
-  Searchbar,
-  Loader,
+  Dialog,
+  EmptyStateLayout,
+  LinkButton,
+  VisuallyHidden,
 } from '@strapi/design-system';
-import { Plus, Pencil, Trash, Eye, Duplicate, File } from '@strapi/icons';
-import { Page, useNotification } from '@strapi/strapi/admin';
+import { Plus, Pencil, Trash, Eye, Duplicate, WarningCircle } from '@strapi/icons';
+import { EmptyDocuments } from '@strapi/icons/symbols';
+import {
+  Page,
+  Layouts,
+  SearchInput,
+  ConfirmDialog,
+  useNotification,
+  useQueryParams,
+} from '@strapi/strapi/admin';
 
 import { useForms } from '../hooks';
-import { EmptyState, ConfirmDialog } from '../components/shared';
-import type { Form } from '../utils/api';
+import { getTranslation } from '../utils/getTranslation';
+import type { Form, FormsQueryParams } from '../utils/api';
 
 /**
- * Forms List Page - Main landing page for the plugin
- * Displays all forms in a table with search, status badges, and actions
+ * Forms List Page - Main landing page for the plugin.
+ *
+ * Displays all forms in a native Strapi table with server-driven search
+ * (synced via `useQueryParams`), status badges, and row actions.
  */
 export const FormsListPage = () => {
   const navigate = useNavigate();
+  const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
 
-  const { forms, isLoading, error, refetch, deleteForm, duplicateForm } = useForms();
+  // Search term is the source of truth in the URL (`_q`), set by <SearchInput />.
+  const [{ query }] = useQueryParams<{ _q?: string }>();
+  const search = query._q ? decodeURIComponent(query._q) : undefined;
 
-  // Search state
-  const [searchValue, setSearchValue] = useState('');
+  const queryParams: FormsQueryParams = { _q: search };
+  const { forms, isLoading, error, deleteForm, duplicateForm } = useForms(queryParams);
 
   // Delete confirmation state
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [formToDelete, setFormToDelete] = useState<Form | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Duplicate loading state
   const [isDuplicating, setIsDuplicating] = useState<string | null>(null);
 
-  // Filtered forms based on search
-  const filteredForms = useMemo(() => {
-    if (!searchValue.trim()) {
-      return forms;
-    }
-    const searchLower = searchValue.toLowerCase();
-    return forms.filter(
-      (form) =>
-        form.title.toLowerCase().includes(searchLower) ||
-        form.slug.toLowerCase().includes(searchLower)
-    );
-  }, [forms, searchValue]);
+  const tabTitle = formatMessage({ id: getTranslation('forms.title'), defaultMessage: 'Forms' });
 
-  // Handle search input change
-  const handleSearchChange = useCallback((value: string) => {
-    setSearchValue(value);
-  }, []);
-
-  // Handle search clear
-  const handleSearchClear = useCallback(() => {
-    setSearchValue('');
-  }, []);
-
-  // Navigation handlers
-  const handleCreateForm = useCallback(() => {
+  const handleCreateForm = () => {
     navigate('forms/create');
-  }, [navigate]);
+  };
 
-  const handleEditForm = useCallback(
-    (form: Form) => {
-      navigate(`forms/${form.documentId}/edit`);
-    },
-    [navigate]
-  );
+  const handleEditForm = (form: Form) => {
+    navigate(`forms/${form.documentId}/edit`);
+  };
 
-  const handleViewSubmissions = useCallback(
-    (form: Form) => {
-      navigate(`forms/${form.documentId}/submissions`);
-    },
-    [navigate]
-  );
+  const handleViewSubmissions = (form: Form) => {
+    navigate(`forms/${form.documentId}/submissions`);
+  };
 
-  // Duplicate form handler
-  const handleDuplicateForm = useCallback(
-    async (form: Form) => {
-      setIsDuplicating(form.documentId);
-      try {
-        await duplicateForm(form.documentId);
-        toggleNotification({
-          type: 'success',
-          message: `Form "${form.title}" duplicated successfully`,
-        });
-      } catch {
-        toggleNotification({
-          type: 'danger',
-          message: 'Failed to duplicate form',
-        });
-      } finally {
-        setIsDuplicating(null);
-      }
-    },
-    [duplicateForm, toggleNotification]
-  );
+  const handleDuplicateForm = async (form: Form) => {
+    setIsDuplicating(form.documentId);
+    try {
+      await duplicateForm(form.documentId);
+      toggleNotification({
+        type: 'success',
+        message: formatMessage(
+          {
+            id: getTranslation('forms.duplicate.success'),
+            defaultMessage: 'Form "{title}" duplicated successfully',
+          },
+          { title: form.title }
+        ),
+      });
+    } catch {
+      toggleNotification({
+        type: 'danger',
+        message: formatMessage({
+          id: getTranslation('forms.duplicate.error'),
+          defaultMessage: 'Failed to duplicate form',
+        }),
+      });
+    } finally {
+      setIsDuplicating(null);
+    }
+  };
 
-  // Delete form handlers
-  const handleDeleteClick = useCallback((form: Form) => {
-    setFormToDelete(form);
-    setDeleteDialogOpen(true);
-  }, []);
-
-  const handleDeleteCancel = useCallback(() => {
-    setDeleteDialogOpen(false);
-    setFormToDelete(null);
-  }, []);
-
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!formToDelete) return;
-
-    setIsDeleting(true);
+  const handleDeleteConfirm = async () => {
+    if (!formToDelete) {
+      return;
+    }
     try {
       await deleteForm(formToDelete.documentId);
       toggleNotification({
         type: 'success',
-        message: `Form "${formToDelete.title}" deleted successfully`,
+        message: formatMessage(
+          {
+            id: getTranslation('forms.delete.success'),
+            defaultMessage: 'Form "{title}" deleted successfully',
+          },
+          { title: formToDelete.title }
+        ),
       });
-      setDeleteDialogOpen(false);
-      setFormToDelete(null);
     } catch {
       toggleNotification({
         type: 'danger',
-        message: 'Failed to delete form',
+        message: formatMessage({
+          id: getTranslation('forms.delete.error'),
+          defaultMessage: 'Failed to delete form',
+        }),
       });
     } finally {
-      setIsDeleting(false);
+      setFormToDelete(null);
     }
-  }, [formToDelete, deleteForm, toggleNotification]);
+  };
 
-  // Loading state
   if (isLoading) {
-    return (
-      <Page.Main>
-        <Page.Title>Forms</Page.Title>
-        <Flex justifyContent="center" alignItems="center" height="400px">
-          <Loader>Loading forms...</Loader>
-        </Flex>
-      </Page.Main>
-    );
+    return <Page.Loading />;
   }
 
-  // Error state
   if (error) {
-    return (
-      <Page.Main>
-        <Page.Title>Forms</Page.Title>
-        <Box padding={8}>
-          <EmptyState
-            title="Error loading forms"
-            description={error.message}
-            action={
-              <Button onClick={() => refetch()} variant="secondary">
-                Try again
-              </Button>
-            }
-          />
-        </Box>
-      </Page.Main>
-    );
+    return <Page.Error />;
   }
 
-  // Column count for table
-  const colCount = 5;
-  const rowCount = filteredForms.length;
+  const numberOfForms = forms.length;
+  // No forms exist at all (and the user is not actively filtering): full empty state.
+  const isFilteredEmpty = numberOfForms === 0 && Boolean(search);
 
   return (
-    <Main>
-      <Page.Title>Forms</Page.Title>
-
-      {/* Header Section */}
-      <Box padding={8} background="neutral100">
-        <Flex justifyContent="space-between" alignItems="center">
-          <Box>
-            <Typography variant="alpha" as="h1">
-              Forms
-            </Typography>
-            <Typography variant="epsilon" textColor="neutral600">
-              Create and manage your forms
-            </Typography>
-          </Box>
+    <Page.Main>
+      <Page.Title>{tabTitle}</Page.Title>
+      <Layouts.Header
+        title={tabTitle}
+        subtitle={formatMessage({
+          id: getTranslation('forms.subtitle'),
+          defaultMessage: 'Create and manage your forms',
+        })}
+        primaryAction={
           <Button startIcon={<Plus />} onClick={handleCreateForm}>
-            Create Form
+            {formatMessage({
+              id: getTranslation('forms.create'),
+              defaultMessage: 'Create form',
+            })}
           </Button>
-        </Flex>
-      </Box>
-
-      {/* Content Section */}
-      <Box padding={8}>
-        {/* Empty State */}
-        {forms.length === 0 ? (
-          <EmptyState
-            title="No forms yet"
-            description="Create your first form to start collecting submissions"
-            icon={<File width={40} height={40} />}
-            action={
-              <Button startIcon={<Plus />} onClick={handleCreateForm}>
-                Create your first form
-              </Button>
+        }
+      />
+      <Layouts.Action
+        startActions={
+          <SearchInput
+            label={formatMessage({
+              id: getTranslation('forms.search.label'),
+              defaultMessage: 'Search for a form',
+            })}
+            placeholder={formatMessage({
+              id: getTranslation('forms.search.placeholder'),
+              defaultMessage: 'Search forms...',
+            })}
+          />
+        }
+      />
+      <Layouts.Content>
+        {numberOfForms > 0 ? (
+          <Table
+            colCount={5}
+            rowCount={numberOfForms + 1}
+            footer={
+              <TFooter onClick={handleCreateForm} icon={<Plus />}>
+                {formatMessage({
+                  id: getTranslation('forms.create'),
+                  defaultMessage: 'Create form',
+                })}
+              </TFooter>
             }
+          >
+            <Thead>
+              <Tr>
+                <Th>
+                  <Typography variant="sigma" textColor="neutral600">
+                    {formatMessage({
+                      id: getTranslation('forms.column.title'),
+                      defaultMessage: 'Title',
+                    })}
+                  </Typography>
+                </Th>
+                <Th>
+                  <Typography variant="sigma" textColor="neutral600">
+                    {formatMessage({
+                      id: getTranslation('forms.column.slug'),
+                      defaultMessage: 'Slug',
+                    })}
+                  </Typography>
+                </Th>
+                <Th>
+                  <Typography variant="sigma" textColor="neutral600">
+                    {formatMessage({
+                      id: getTranslation('forms.column.submissions'),
+                      defaultMessage: 'Submissions',
+                    })}
+                  </Typography>
+                </Th>
+                <Th>
+                  <Typography variant="sigma" textColor="neutral600">
+                    {formatMessage({
+                      id: getTranslation('forms.column.status'),
+                      defaultMessage: 'Status',
+                    })}
+                  </Typography>
+                </Th>
+                <Th>
+                  <VisuallyHidden>
+                    {formatMessage({
+                      id: getTranslation('forms.column.actions'),
+                      defaultMessage: 'Actions',
+                    })}
+                  </VisuallyHidden>
+                </Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {forms.map((form) => (
+                <Tr
+                  key={form.documentId}
+                  onClick={() => handleEditForm(form)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <Td>
+                    <Typography fontWeight="bold" textColor="neutral800">
+                      {form.title}
+                    </Typography>
+                  </Td>
+                  <Td>
+                    <Typography textColor="neutral600">{form.slug}</Typography>
+                  </Td>
+                  <Td>
+                    <Badge>{form.submissionCount}</Badge>
+                  </Td>
+                  <Td>
+                    <Status variant={form.isActive ? 'success' : 'secondary'} size="S">
+                      <Typography variant="omega" fontWeight="bold">
+                        {form.isActive
+                          ? formatMessage({
+                              id: getTranslation('forms.status.active'),
+                              defaultMessage: 'Active',
+                            })
+                          : formatMessage({
+                              id: getTranslation('forms.status.inactive'),
+                              defaultMessage: 'Inactive',
+                            })}
+                      </Typography>
+                    </Status>
+                  </Td>
+                  <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                    <Flex gap={1} justifyContent="flex-end">
+                      <IconButton
+                        label={formatMessage({
+                          id: getTranslation('forms.action.viewSubmissions'),
+                          defaultMessage: 'View submissions',
+                        })}
+                        onClick={() => handleViewSubmissions(form)}
+                        variant="ghost"
+                      >
+                        <Eye />
+                      </IconButton>
+                      <IconButton
+                        label={formatMessage({
+                          id: getTranslation('forms.action.edit'),
+                          defaultMessage: 'Edit form',
+                        })}
+                        onClick={() => handleEditForm(form)}
+                        variant="ghost"
+                      >
+                        <Pencil />
+                      </IconButton>
+                      <IconButton
+                        label={formatMessage({
+                          id: getTranslation('forms.action.duplicate'),
+                          defaultMessage: 'Duplicate form',
+                        })}
+                        onClick={() => handleDuplicateForm(form)}
+                        variant="ghost"
+                        disabled={isDuplicating === form.documentId}
+                      >
+                        <Duplicate />
+                      </IconButton>
+                      <IconButton
+                        label={formatMessage({
+                          id: getTranslation('forms.action.delete'),
+                          defaultMessage: 'Delete form',
+                        })}
+                        onClick={() => setFormToDelete(form)}
+                        variant="ghost"
+                      >
+                        <Trash />
+                      </IconButton>
+                    </Flex>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        ) : isFilteredEmpty ? (
+          <EmptyStateLayout
+            icon={<EmptyDocuments width="160px" />}
+            content={formatMessage(
+              {
+                id: getTranslation('forms.search.empty'),
+                defaultMessage: 'No forms match your search.',
+              },
+              { search }
+            )}
           />
         ) : (
-          <Flex direction="column" gap={4}>
-            {/* Search Bar */}
-            <Box maxWidth="320px">
-              <Searchbar
-                name="search"
-                placeholder="Search forms..."
-                value={searchValue}
-                onChange={handleSearchChange}
-                onClear={handleSearchClear}
-                clearLabel="Clear search"
+          <EmptyStateLayout
+            icon={<EmptyDocuments width="160px" />}
+            content={formatMessage({
+              id: getTranslation('forms.empty'),
+              defaultMessage: 'Create your first form to start collecting submissions',
+            })}
+            action={
+              <LinkButton
+                tag={NavLink}
+                to="forms/create"
+                variant="secondary"
+                startIcon={<Plus />}
               >
-                Search
-              </Searchbar>
-            </Box>
-
-            {/* Forms Table */}
-            {filteredForms.length === 0 ? (
-              <EmptyState
-                title="No forms found"
-                description={`No forms match "${searchValue}"`}
-                action={
-                  <Button variant="secondary" onClick={handleSearchClear}>
-                    Clear search
-                  </Button>
-                }
-              />
-            ) : (
-              <Table
-                colCount={colCount}
-                rowCount={rowCount}
-                footer={
-                  <Box padding={4} background="neutral100">
-                    <Typography variant="pi" textColor="neutral600">
-                      Showing {filteredForms.length} of {forms.length} forms
-                    </Typography>
-                  </Box>
-                }
-              >
-                <Thead>
-                  <Tr>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Title
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Slug
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Submissions
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Status
-                      </Typography>
-                    </Th>
-                    <Th>
-                      <Typography variant="sigma" textColor="neutral600">
-                        Actions
-                      </Typography>
-                    </Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {filteredForms.map((form) => (
-                    <Tr key={form.documentId}>
-                      <Td>
-                        <Typography fontWeight="bold">{form.title}</Typography>
-                      </Td>
-                      <Td>
-                        <Typography textColor="neutral600">{form.slug}</Typography>
-                      </Td>
-                      <Td>
-                        <Badge>{form.submissionCount}</Badge>
-                      </Td>
-                      <Td>
-                        <Badge variant={form.isActive ? 'success' : 'secondary'}>
-                          {form.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </Td>
-                      <Td>
-                        <Flex gap={1}>
-                          <IconButton
-                            label="View submissions"
-                            onClick={() => handleViewSubmissions(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Eye />
-                          </IconButton>
-                          <IconButton
-                            label="Edit form"
-                            onClick={() => handleEditForm(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Pencil />
-                          </IconButton>
-                          <IconButton
-                            label="Duplicate form"
-                            onClick={() => handleDuplicateForm(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                            disabled={isDuplicating === form.documentId}
-                          >
-                            <Duplicate />
-                          </IconButton>
-                          <IconButton
-                            label="Delete form"
-                            onClick={() => handleDeleteClick(form)}
-                            variant="ghost"
-                            withTooltip={false}
-                          >
-                            <Trash />
-                          </IconButton>
-                        </Flex>
-                      </Td>
-                    </Tr>
-                  ))}
-                </Tbody>
-              </Table>
-            )}
-          </Flex>
+                {formatMessage({
+                  id: getTranslation('forms.create'),
+                  defaultMessage: 'Create form',
+                })}
+              </LinkButton>
+            }
+          />
         )}
-      </Box>
+      </Layouts.Content>
 
-      {/* Delete Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={deleteDialogOpen}
-        onClose={handleDeleteCancel}
-        onConfirm={handleDeleteConfirm}
-        title="Delete Form"
-        message={`Are you sure you want to delete "${formToDelete?.title}"? This will also delete all associated submissions. This action cannot be undone.`}
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        variant="danger"
-        isConfirming={isDeleting}
-      />
-    </Main>
+      <Dialog.Root
+        open={formToDelete !== null}
+        onOpenChange={(open: boolean) => {
+          if (!open) {
+            setFormToDelete(null);
+          }
+        }}
+      >
+        <ConfirmDialog onConfirm={handleDeleteConfirm} variant="danger-light" icon={<WarningCircle />}>
+          {formatMessage(
+            {
+              id: getTranslation('forms.delete.confirm'),
+              defaultMessage:
+                'Are you sure you want to delete "{title}"? This will also delete all associated submissions. This action cannot be undone.',
+            },
+            { title: formToDelete?.title ?? '' }
+          )}
+        </ConfirmDialog>
+      </Dialog.Root>
+    </Page.Main>
   );
 };
