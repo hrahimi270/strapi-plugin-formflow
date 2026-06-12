@@ -397,7 +397,12 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Format a value for HTML display
+   * Format a value for HTML display.
+   *
+   * This is the single HTML-escape boundary for submission values in emails.
+   * Stored submission data is RAW (the validation sanitizer only trims, it does
+   * not HTML-escape), so every string here is escaped exactly once via
+   * escapeHtml — never assume the value is pre-escaped, and never escape twice.
    */
   formatValueForHtml(value: unknown): string {
     if (value === null || value === undefined || value === '') {

@@ -220,23 +220,52 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Escape a value for CSV (handles quotes, commas, newlines)
+   * Neutralize CSV formula injection.
+   *
+   * Spreadsheet applications (Excel, Google Sheets, LibreOffice) treat cells
+   * beginning with =, +, -, @, tab (\t), or carriage return (\r) as formulas.
+   * A malicious submission value like `=cmd|...` could execute on the
+   * reviewer's machine. Prefixing such values with a single quote forces them
+   * to be treated as literal text.
+   *
+   * @param value - Raw string value
+   * @returns Value safe from formula interpretation
+   */
+  sanitizeForFormulaInjection(value: string): string {
+    if (value.length === 0) {
+      return value;
+    }
+
+    const firstChar = value.charAt(0);
+    if (['=', '+', '-', '@', '\t', '\r'].includes(firstChar)) {
+      return `'${value}`;
+    }
+
+    return value;
+  },
+
+  /**
+   * Escape a value for CSV (handles formula injection, quotes, commas, newlines)
    *
    * @param value - Raw string value
    * @returns Properly escaped CSV value
    */
   escapeCSVValue(value: string): string {
+    // Neutralize formula injection BEFORE quote-escaping so the guard quote is
+    // also wrapped/escaped correctly.
+    const guarded = this.sanitizeForFormulaInjection(value);
+
     // If value contains comma, quote, newline, or carriage return, wrap in quotes
     if (
-      value.includes(',') ||
-      value.includes('"') ||
-      value.includes('\n') ||
-      value.includes('\r')
+      guarded.includes(',') ||
+      guarded.includes('"') ||
+      guarded.includes('\n') ||
+      guarded.includes('\r')
     ) {
       // Double up any existing quotes and wrap in quotes
-      return `"${value.replace(/"/g, '""')}"`;
+      return `"${guarded.replace(/"/g, '""')}"`;
     }
-    return value;
+    return guarded;
   },
 
   /**
