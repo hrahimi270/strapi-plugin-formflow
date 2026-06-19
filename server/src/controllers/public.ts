@@ -1,5 +1,7 @@
 import type { Core } from '@strapi/strapi';
 
+import type { UploadedFilesMap } from '../services/submission';
+
 /**
  * Koa context interface for public controller methods
  */
@@ -10,6 +12,12 @@ export interface PublicContext {
     body: Record<string, unknown>;
     ip: string;
     headers: Record<string, string | string[] | undefined>;
+    /**
+     * Files parsed from a multipart/form-data submission, keyed by the
+     * multipart field name. Populated by the core `strapi::body` middleware
+     * (koa-body, patchKoa). Absent for JSON submissions.
+     */
+    files?: UploadedFilesMap;
   };
   status: number;
   notFound: (message?: string) => void;
@@ -96,7 +104,14 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
    */
   async submitForm(ctx: PublicContext) {
     const { slug } = ctx.params;
-    const submissionData = ctx.request.body as Record<string, unknown>;
+
+    // For multipart/form-data submissions koa-body splits the request into text
+    // fields (ctx.request.body) and uploaded files (ctx.request.files, keyed by
+    // field name). For JSON submissions only the body is set and files is empty.
+    // Both content types are supported transparently.
+    const submissionData = (ctx.request.body || {}) as Record<string, unknown>;
+    const files = (ctx.request.files || {}) as UploadedFilesMap;
+    const hasFiles = Object.keys(files).length > 0;
 
     if (!slug || typeof slug !== 'string') {
       ctx.status = 400;
@@ -109,7 +124,9 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
       };
     }
 
-    if (!submissionData || typeof submissionData !== 'object') {
+    // A submission must carry either body fields or uploaded files. A
+    // file-only multipart submission has an empty body but non-empty files.
+    if ((!submissionData || typeof submissionData !== 'object') && !hasFiles) {
       ctx.status = 400;
       return {
         error: {
@@ -135,7 +152,7 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
       const result = await strapi
         .plugin('strapi-forms')
         .service('submission')
-        .submit(slug, submissionData, metadata);
+        .submit(slug, submissionData, metadata, files);
 
       return {
         data: {

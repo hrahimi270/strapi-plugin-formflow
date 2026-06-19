@@ -1,6 +1,32 @@
 import type { Core } from '@strapi/strapi';
 
-import type { ValidatableField } from './validation';
+import type { ValidatableField, UploadedFileMeta, UploadedFilesMap } from './validation';
+
+/**
+ * Re-export the multipart file types so the controller can type the files map it
+ * forwards into {@link submissionService.submit} without reaching into the
+ * validation service directly.
+ */
+export type { UploadedFileMeta, UploadedFilesMap };
+
+/**
+ * Media-library reference stored in submission.data for a `file` field.
+ * Mirrors the public-safe subset of a Strapi upload file record.
+ */
+export interface SubmissionFileRef {
+  /** Numeric media id. */
+  id: number;
+  /** Document id (Strapi v5); present on persisted upload records. */
+  documentId?: string;
+  /** Public URL of the uploaded file. */
+  url: string;
+  /** Stored file name. */
+  name: string;
+  /** Detected/declared MIME type. */
+  mime?: string;
+  /** File size in bytes. */
+  size?: number;
+}
 
 /**
  * Content type UID for form submissions
@@ -117,8 +143,10 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * Complete submission workflow: validate, sanitize, store, trigger hooks
    *
    * @param slug - Form slug identifier
-   * @param data - Raw submission data
+   * @param data - Raw submission data (non-file fields)
    * @param metadata - Client metadata (IP, user agent, etc.)
+   * @param files - Uploaded files keyed by field name (from multipart parser).
+   *   Optional so plain JSON submissions keep working unchanged.
    * @returns Submission result with success message/redirect
    * @throws ValidationError if validation fails
    * @throws Error if form not found or inactive
@@ -126,7 +154,8 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
   async submit(
     slug: string,
     data: Record<string, unknown>,
-    metadata: SubmissionMetadata
+    metadata: SubmissionMetadata,
+    files: UploadedFilesMap = {}
   ): Promise<SubmissionResult> {
     const formService = strapi.plugin('strapi-forms').service('form');
     const validationService = strapi.plugin('strapi-forms').service('validation');
@@ -153,15 +182,35 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       delete submissionData[honeypotFieldName];
     }
 
-    // Validate submission data against form field definitions
-    const validationResult = validationService.validate(form.fields || [], submissionData);
+    const formFields = form.fields || [];
 
-    if (!validationResult.valid) {
-      throw new ValidationError(validationResult.errors);
+    // Validate non-file submission data against form field definitions.
+    const validationResult = validationService.validate(formFields, submissionData);
+
+    // Validate uploaded files (required/maxSize/allowedTypes) BEFORE persisting
+    // anything to the media library, so oversize/disallowed files never land.
+    const fileValidationResult = validationService.validateFiles(
+      formFields,
+      files,
+      submissionData
+    );
+
+    // Merge field-level errors from both passes and reject as one response.
+    const combinedErrors: Record<string, string[]> = {
+      ...validationResult.errors,
+      ...fileValidationResult.errors,
+    };
+
+    if (Object.keys(combinedErrors).length > 0) {
+      throw new ValidationError(combinedErrors);
     }
 
+    // Files passed validation: upload them to the media library and place the
+    // resulting media references into the submission data under each field name.
+    await this.processFileUploads(formFields, files, submissionData);
+
     // Sanitize data before storage
-    const sanitizedData = validationService.sanitize(form.fields || [], submissionData);
+    const sanitizedData = validationService.sanitize(formFields, submissionData);
 
     // Create submission record
     const submission = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).create({
@@ -190,6 +239,85 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       submission,
       successMessage: form.successMessage || 'Thank you for your submission',
       redirectUrl: form.redirectUrl,
+    };
+  },
+
+  /**
+   * Upload the validated files for each `file` field to the Strapi media library
+   * and write the resulting media reference(s) into `submissionData` under the
+   * field name.
+   *
+   * Must be called only AFTER {@link ValidationService.validateFiles} has
+   * accepted the files, so oversize/disallowed files are never persisted. Uses
+   * the core upload plugin's programmatic service (always present — `upload` is
+   * a core Strapi plugin). A single uploaded file is stored as one reference
+   * object; multiple files as an array of references.
+   *
+   * @param fields - Form field definitions (only `file` fields are processed)
+   * @param files - Uploaded files keyed by field name (from the multipart parser)
+   * @param submissionData - Mutable submission data; file refs are written here
+   */
+  async processFileUploads(
+    fields: ValidatableField[],
+    files: UploadedFilesMap,
+    submissionData: Record<string, unknown>
+  ): Promise<void> {
+    const uploadService = strapi.plugin('upload').service('upload');
+
+    for (const field of fields) {
+      if (field.type !== 'file') {
+        continue;
+      }
+
+      const uploaded = files[field.name];
+      const fileList: UploadedFileMeta[] = uploaded
+        ? Array.isArray(uploaded)
+          ? uploaded
+          : [uploaded]
+        : [];
+
+      if (fileList.length === 0) {
+        continue;
+      }
+
+      // The upload service accepts an array of files in a single call and
+      // returns the array of persisted media records.
+      const created = (await uploadService.upload({
+        data: {},
+        files: fileList,
+      })) as Array<Record<string, unknown>>;
+
+      const refs = created.map((file) => this.toFileRef(file));
+
+      // Preserve single-vs-multiple semantics: a single uploaded file is stored
+      // as one object, multiple files as an array.
+      submissionData[field.name] = refs.length === 1 ? refs[0] : refs;
+    }
+  },
+
+  /**
+   * Map a persisted upload-plugin file record to the public-safe media reference
+   * we store in submission data.
+   *
+   * @param file - Raw file record returned by the upload service
+   */
+  toFileRef(file: Record<string, unknown>): SubmissionFileRef {
+    // The upload record stores `size` in KILOBYTES and `sizeInBytes` in bytes.
+    // Prefer the byte-accurate field for the stored reference.
+    const sizeBytes =
+      typeof file.sizeInBytes === 'number'
+        ? file.sizeInBytes
+        : typeof file.size === 'number'
+          ? file.size
+          : undefined;
+
+    return {
+      id: file.id as number,
+      ...(typeof file.documentId === 'string' ? { documentId: file.documentId } : {}),
+      url: (file.url as string) ?? '',
+      name: (file.name as string) ?? '',
+      ...(typeof file.mime === 'string' ? { mime: file.mime } : {}),
+      ...(sizeBytes !== undefined ? { size: sizeBytes } : {}),
     };
   },
 

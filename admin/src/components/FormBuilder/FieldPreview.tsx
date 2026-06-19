@@ -198,24 +198,46 @@ export const FieldPreview = ({ field }: FieldPreviewProps) => {
     );
   }
 
-  // File
+  // File — realistic, disabled native file input preview. We surface the
+  // configured constraints (accepted types / max size) so the builder can see
+  // how the field will behave for end users.
   if (field.type === 'file') {
+    const allowedTypesRule = (field.validation || []).find((r) => r.type === 'allowedTypes');
+    const maxSizeRule = (field.validation || []).find((r) => r.type === 'maxSize');
+    const accept =
+      typeof allowedTypesRule?.value === 'string' && allowedTypesRule.value.trim()
+        ? allowedTypesRule.value
+        : undefined;
+    const maxSize =
+      maxSizeRule?.value !== undefined &&
+      maxSizeRule?.value !== null &&
+      String(maxSizeRule.value).trim() !== ''
+        ? `${maxSizeRule.value}MB`
+        : undefined;
+
+    const constraintHints = [
+      accept ? `Accepted: ${accept}` : undefined,
+      maxSize ? `Max size: ${maxSize}` : undefined,
+    ].filter(Boolean);
+
     return (
       <Field.Root name={field.name} hint={field.description || undefined}>
         <PreviewLabel field={field} />
-        <Box
-          padding={4}
-          background="neutral100"
-          hasRadius
-          borderColor="neutral200"
-          borderStyle="dashed"
-          borderWidth="1px"
-          textAlign="center"
-        >
-          <Typography variant="pi" textColor="neutral500">
-            {placeholder || 'Click or drop a file to upload'}
-          </Typography>
-        </Box>
+        <Flex direction="column" alignItems="stretch" gap={1} paddingTop={1}>
+          <input
+            type="file"
+            name={field.name}
+            accept={accept}
+            disabled
+            aria-label={field.label}
+            style={{ cursor: 'not-allowed' }}
+          />
+          {constraintHints.length > 0 ? (
+            <Typography variant="pi" textColor="neutral500">
+              {constraintHints.join(' · ')}
+            </Typography>
+          ) : null}
+        </Flex>
         {field.description ? <Field.Hint /> : null}
       </Field.Root>
     );

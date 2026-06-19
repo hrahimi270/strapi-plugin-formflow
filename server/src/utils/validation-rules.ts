@@ -92,6 +92,123 @@ export const isRuleApplicable = (ruleType: string, fieldType: string): boolean =
 };
 
 /**
+ * Minimal metadata describing an uploaded file, taken from the multipart parser
+ * (formidable). Only the fields needed for server-side validation are required;
+ * different parsers expose slightly different property names so we accept the
+ * common aliases.
+ */
+export interface UploadedFileMeta {
+  /** Original file name as provided by the client (formidable: originalFilename). */
+  originalFilename?: string | null;
+  /** Alternative name field used by some parsers. */
+  name?: string | null;
+  /** Declared MIME type (formidable: mimetype). */
+  mimetype?: string | null;
+  /** Alternative MIME field used by some parsers. */
+  type?: string | null;
+  /** File size in bytes. */
+  size?: number;
+}
+
+/**
+ * Extract the file name and declared MIME type from an uploaded file regardless
+ * of which multipart parser produced it.
+ *
+ * @param file - Uploaded file metadata
+ */
+export const getUploadedFileInfo = (
+  file: UploadedFileMeta
+): { fileName: string; mimeType: string; size: number } => ({
+  fileName: file.originalFilename || file.name || 'file',
+  mimeType: (file.mimetype || file.type || '').toLowerCase(),
+  size: typeof file.size === 'number' ? file.size : 0,
+});
+
+/**
+ * Test whether a file's MIME type (and extension as a fallback) is permitted by
+ * a comma-separated allow list. Supports wildcard categories (e.g. `image/*`)
+ * and bare extensions (e.g. `.pdf` / `pdf`).
+ *
+ * @param mimeType - The file's declared MIME type (lowercased)
+ * @param fileName - The file's original name (used for extension matching)
+ * @param allowedTypesRaw - Comma-separated list of allowed MIME types / extensions
+ */
+export const isFileTypeAllowed = (
+  mimeType: string,
+  fileName: string,
+  allowedTypesRaw: string
+): boolean => {
+  const allowedTypes = allowedTypesRaw
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => t.length > 0);
+
+  if (allowedTypes.length === 0) {
+    // No constraint configured -> allow.
+    return true;
+  }
+
+  const lowerName = fileName.toLowerCase();
+
+  return allowedTypes.some((allowed) => {
+    if (allowed.endsWith('/*')) {
+      // Wildcard category, e.g. image/* matches image/png.
+      const category = allowed.slice(0, -1); // keep trailing slash -> "image/"
+      return mimeType.startsWith(category);
+    }
+    if (allowed.startsWith('.')) {
+      // Bare extension, e.g. ".pdf".
+      return lowerName.endsWith(allowed);
+    }
+    if (!allowed.includes('/')) {
+      // Bare extension without dot, e.g. "pdf".
+      return lowerName.endsWith(`.${allowed}`);
+    }
+    // Exact MIME type match.
+    return mimeType === allowed;
+  });
+};
+
+/**
+ * Validate a single uploaded file against a field's `maxSize` / `allowedTypes`
+ * validation rules. `maxSize` is expressed in MEGABYTES (matching the admin
+ * rule editor and the existing validation-service convention).
+ *
+ * @param file - Uploaded file metadata from the multipart parser
+ * @param rules - The field's validation rules (only maxSize/allowedTypes apply)
+ * @returns An array of human-readable error messages (empty when the file is valid)
+ */
+export const validateUploadedFile = (
+  file: UploadedFileMeta,
+  rules: Array<{ type: string; value?: unknown; message?: string }> = []
+): string[] => {
+  const errors: string[] = [];
+  const { fileName, mimeType, size } = getUploadedFileInfo(file);
+
+  for (const rule of rules) {
+    if (rule.type === 'maxSize') {
+      const maxSizeMb = Number(rule.value);
+      if (!Number.isNaN(maxSizeMb) && maxSizeMb > 0) {
+        const maxSizeBytes = maxSizeMb * 1024 * 1024;
+        if (size > maxSizeBytes) {
+          errors.push(rule.message || `File "${fileName}" exceeds the maximum size of ${maxSizeMb}MB`);
+        }
+      }
+    } else if (rule.type === 'allowedTypes') {
+      if (typeof rule.value === 'string' && rule.value.trim().length > 0) {
+        if (!isFileTypeAllowed(mimeType, fileName, rule.value)) {
+          errors.push(
+            rule.message || `File "${fileName}" type is not allowed. Accepted types: ${rule.value}`
+          );
+        }
+      }
+    }
+  }
+
+  return errors;
+};
+
+/**
  * Determine whether a value counts as "empty" for conditional/required checks.
  * Kept consistent with the validation service's isEmpty semantics.
  *

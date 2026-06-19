@@ -3,7 +3,9 @@ import {
   isLayoutField,
   isFieldVisible,
   isEmptyValue,
+  validateUploadedFile,
   type ConditionalRule,
+  type UploadedFileMeta,
 } from '../utils/validation-rules';
 import {
   escapeHtml,
@@ -47,7 +49,14 @@ export interface ValidatableField {
 
 // Re-export the conditional rule type so consumers importing from the service
 // (e.g. submission service) have access to it alongside the validation types.
-export type { ConditionalRule };
+export type { ConditionalRule, UploadedFileMeta };
+
+/**
+ * Map of uploaded files keyed by form field name. Each entry is either a single
+ * uploaded file or an array of them (for multi-file fields). Mirrors the shape
+ * of `ctx.request.files` produced by koa-body for a multipart submission.
+ */
+export type UploadedFilesMap = Record<string, UploadedFileMeta | UploadedFileMeta[] | undefined>;
 
 /**
  * Validation service for form submissions
@@ -67,6 +76,13 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
     for (const field of fields) {
       // Skip layout fields (heading, paragraph, divider)
       if (isLayoutField(field.type)) {
+        continue;
+      }
+
+      // File fields carry uploaded file metadata, not a value in `data`. They are
+      // validated separately by validateFiles() (called from the submission
+      // service with the multipart files map), so skip them here.
+      if (field.type === 'file') {
         continue;
       }
 
@@ -111,6 +127,76 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
         if (optionError) {
           fieldErrors.push(optionError);
         }
+      }
+
+      if (fieldErrors.length > 0) {
+        errors[field.name] = fieldErrors;
+      }
+    }
+
+    return {
+      valid: Object.keys(errors).length === 0,
+      errors,
+    };
+  },
+
+  /**
+   * Validate uploaded files against the form's `file` field definitions.
+   *
+   * Runs BEFORE the files are uploaded to the media library, so oversize or
+   * disallowed files are rejected without ever being persisted. Enforces:
+   *  - `required`: a required file field with no uploaded file errors,
+   *  - per-file `maxSize` (MB) and `allowedTypes` (MIME / extension) rules.
+   *
+   * Hidden file fields (by conditional rule) are skipped. Non-file fields are
+   * untouched (handled by {@link validate}).
+   *
+   * @param fields - Array of form field definitions
+   * @param files - Uploaded files keyed by field name (from the multipart parser)
+   * @param data - The non-file submission data (used for conditional visibility)
+   * @returns ValidationResult with valid flag and error messages by field name
+   */
+  validateFiles(
+    fields: ValidatableField[],
+    files: UploadedFilesMap,
+    data: Record<string, unknown> = {}
+  ): ValidationResult {
+    const errors: Record<string, string[]> = {};
+
+    for (const field of fields) {
+      if (field.type !== 'file') {
+        continue;
+      }
+
+      // A file field hidden by its conditional rule is not shown to the user and
+      // therefore must not enforce required/size/type constraints.
+      if (!isFieldVisible(field.conditional, data)) {
+        continue;
+      }
+
+      const uploaded = files[field.name];
+      const fileList: UploadedFileMeta[] = uploaded
+        ? Array.isArray(uploaded)
+          ? uploaded
+          : [uploaded]
+        : [];
+
+      const fieldErrors: string[] = [];
+
+      if (fileList.length === 0) {
+        if (field.required) {
+          fieldErrors.push(field.requiredMessage || `${field.label} is required`);
+        }
+        // No file uploaded and field optional -> nothing else to validate.
+        if (fieldErrors.length > 0) {
+          errors[field.name] = fieldErrors;
+        }
+        continue;
+      }
+
+      // Validate each uploaded file against the field's size/type rules.
+      for (const file of fileList) {
+        fieldErrors.push(...validateUploadedFile(file, field.validation || []));
       }
 
       if (fieldErrors.length > 0) {
@@ -559,8 +645,9 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       }
 
       case 'file': {
-        // File values should be handled separately (file upload processing)
-        // Return as-is for now
+        // File fields are resolved by the submission service: by the time this
+        // runs, the value is already a media reference (or array of them) of the
+        // shape { id, documentId, url, name, mime, size }. Store it verbatim.
         return value;
       }
 
