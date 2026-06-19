@@ -15,10 +15,18 @@ import {
   Dialog,
 } from '@strapi/design-system';
 import { Check, WarningCircle } from '@strapi/icons';
-import { Page, Layouts, BackButton, ConfirmDialog, useNotification } from '@strapi/strapi/admin';
+import {
+  Page,
+  Layouts,
+  BackButton,
+  ConfirmDialog,
+  useNotification,
+  useRBAC,
+} from '@strapi/strapi/admin';
 import { useIntl } from 'react-intl';
 
 import { getTranslation } from '../utils/getTranslation';
+import { FORM_PERMISSIONS } from '../permissions';
 import { useForm } from '../hooks';
 import type { FormApiError } from '../hooks/useForm';
 import { FormBuilder } from '../components/FormBuilder';
@@ -171,6 +179,14 @@ export const FormEditPage = () => {
   const documentId = isCreating ? undefined : id;
 
   const { form, isLoading, isSaving, error, createForm, updateForm } = useForm(documentId);
+
+  // Saving maps to create (new form) or update (existing form). The relevant
+  // route is also protected server-side; this just keeps the UI honest.
+  const {
+    isLoading: isLoadingRBAC,
+    allowedActions: { canCreate, canUpdate },
+  } = useRBAC(FORM_PERMISSIONS);
+  const canSave = isCreating ? canCreate : canUpdate;
 
   const [formData, setFormData] = useState<FormData>(getEmptyFormData());
   const [hasChanges, setHasChanges] = useState(false);
@@ -349,8 +365,14 @@ export const FormEditPage = () => {
   );
 
   // Loading & error states (native)
-  if (isLoading && !isCreating) {
+  if (isLoadingRBAC || (isLoading && !isCreating)) {
     return <Page.Loading />;
+  }
+
+  // Block the page when the user lacks the permission for the current mode
+  // (create vs edit). Super-admins always pass.
+  if (!canSave) {
+    return <Page.NoPermissions />;
   }
 
   if (error && !isCreating) {
