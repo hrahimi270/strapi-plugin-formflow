@@ -17,6 +17,12 @@ interface FormField {
   type: string;
   name: string;
   label: string;
+  /**
+   * When true, the field is omitted from CSV/JSON exports (e.g. sensitive data
+   * such as passwords or tokens). Read loosely so forms saved without this flag
+   * behave exactly as before. Defaults to false/absent.
+   */
+  excludeFromExport?: boolean;
 }
 
 /**
@@ -47,6 +53,18 @@ interface FormRecord {
  * Layout field types that should be excluded from export
  */
 const LAYOUT_FIELD_TYPES = ['heading', 'paragraph', 'divider'];
+
+/**
+ * Whether a field should appear in exports.
+ *
+ * Layout fields (heading/paragraph/divider) never carry submission data and so
+ * are always excluded, as before. Additionally, any field explicitly flagged
+ * with `excludeFromExport` is dropped so sensitive values can be kept out of
+ * generated CSV/JSON. Reads the flag loosely (defaults to included) so forms
+ * authored before the flag existed are unaffected.
+ */
+const isExportableField = (field: FormField): boolean =>
+  !LAYOUT_FIELD_TYPES.includes(field.type) && field.excludeFromExport !== true;
 
 /**
  * Export service for generating CSV and JSON exports of form submissions
@@ -84,8 +102,8 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
       return '';
     }
 
-    // Get field definitions (exclude layout fields)
-    const fields = (form.fields || []).filter((f) => !LAYOUT_FIELD_TYPES.includes(f.type));
+    // Get field definitions (exclude layout fields and export-excluded fields)
+    const fields = (form.fields || []).filter(isExportableField);
 
     // Build headers
     const headers = [
@@ -295,6 +313,26 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
         sort: { createdAt: 'asc' },
       })) as SubmissionRecord[];
 
+    // Names of fields explicitly excluded from export. When empty (the common
+    // case), each submission's data is emitted verbatim as before.
+    const excludedFieldNames = new Set(
+      (form.fields || []).filter((f) => f.excludeFromExport === true).map((f) => f.name)
+    );
+
+    // Drop excluded keys from a submission's data without mutating the source.
+    const stripExcludedData = (data: Record<string, unknown>): Record<string, unknown> => {
+      if (excludedFieldNames.size === 0 || !data) {
+        return data;
+      }
+      const filtered: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (!excludedFieldNames.has(key)) {
+          filtered[key] = value;
+        }
+      }
+      return filtered;
+    };
+
     // Build export data structure
     const exportData = {
       form: {
@@ -309,7 +347,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
           id: sub.documentId,
           status: sub.status,
           submittedAt: sub.createdAt,
-          data: sub.data,
+          data: stripExcludedData(sub.data),
         };
 
         if (options.includeIp) {
@@ -360,7 +398,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
       .service('submission')
       .count(formId, filters);
 
-    const fields = (form.fields || []).filter((f) => !LAYOUT_FIELD_TYPES.includes(f.type));
+    const fields = (form.fields || []).filter(isExportableField);
 
     return {
       totalSubmissions,

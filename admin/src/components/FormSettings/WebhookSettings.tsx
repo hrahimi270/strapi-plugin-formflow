@@ -6,6 +6,7 @@ import {
   Button,
   Field,
   TextInput,
+  NumberInput,
   SingleSelect,
   SingleSelectOption,
   IconButton,
@@ -51,6 +52,19 @@ const CodeBlock = styled(Box)`
   overflow: auto;
   max-height: 18rem;
 `;
+
+/**
+ * Webhook timeout is stored on the wire in MILLISECONDS (the server reads
+ * `config.timeout` directly as ms, capping it at 30s). The UI presents it in
+ * seconds, so we convert on read/write. Bounds: 5s min, 30s max — the upper
+ * bound matches the server's hard cap so a configured value is never silently
+ * clamped lower than what the admin sees.
+ */
+const SECOND_MS = 1000;
+const MIN_TIMEOUT_SECONDS = 5;
+const MAX_TIMEOUT_SECONDS = 30;
+/** Default shown when a webhook has no explicit timeout (server default: 10s). */
+const DEFAULT_TIMEOUT_SECONDS = 10;
 
 /**
  * Available webhook events with labels
@@ -412,6 +426,47 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                         })}
                       />
                       <Field.Error />
+                    </Field.Root>
+                  </Box>
+                  <Box width="12rem">
+                    <Field.Root
+                      name={`webhook-${webhookId}-timeout`}
+                      hint={formatMessage(
+                        {
+                          id: getTranslation('notifications.webhook.timeout.hint'),
+                          defaultMessage: 'Between {min} and {max} seconds',
+                        },
+                        { min: MIN_TIMEOUT_SECONDS, max: MAX_TIMEOUT_SECONDS }
+                      )}
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('notifications.webhook.timeout.secondsLabel'),
+                          defaultMessage: 'Timeout (seconds)',
+                        })}
+                      </Field.Label>
+                      <NumberInput
+                        value={
+                          typeof webhook.timeout === 'number'
+                            ? Math.round(webhook.timeout / SECOND_MS)
+                            : DEFAULT_TIMEOUT_SECONDS
+                        }
+                        onValueChange={(value: number | undefined) => {
+                          if (value === undefined) {
+                            updateWebhook(index, 'timeout', undefined);
+                            return;
+                          }
+                          const clamped = Math.min(
+                            MAX_TIMEOUT_SECONDS,
+                            Math.max(MIN_TIMEOUT_SECONDS, Math.round(value))
+                          );
+                          updateWebhook(index, 'timeout', clamped * SECOND_MS);
+                        }}
+                        min={MIN_TIMEOUT_SECONDS}
+                        max={MAX_TIMEOUT_SECONDS}
+                        step={1}
+                      />
+                      <Field.Hint />
                     </Field.Root>
                   </Box>
                 </Flex>

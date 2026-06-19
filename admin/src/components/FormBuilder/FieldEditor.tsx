@@ -449,6 +449,30 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
                   </Grid.Item>
                 </Grid.Root>
 
+                {/* Exclude from export — keeps sensitive values (e.g. passwords,
+                    tokens) out of CSV/JSON submission exports. Off by default. */}
+                <Field.Root
+                  name="excludeFromExport"
+                  hint={formatMessage({
+                    id: getTranslation('fieldEditor.excludeFromExport.hint'),
+                    defaultMessage:
+                      'Keep this field out of CSV and JSON submission exports',
+                  })}
+                >
+                  <Checkbox
+                    checked={field.excludeFromExport === true}
+                    onCheckedChange={(checked: boolean) =>
+                      onChange({ excludeFromExport: checked })
+                    }
+                  >
+                    {formatMessage({
+                      id: getTranslation('fieldEditor.excludeFromExport.label'),
+                      defaultMessage: 'Exclude from export',
+                    })}
+                  </Checkbox>
+                  <Field.Hint />
+                </Field.Root>
+
                 {/* Default Value */}
                 {hasDefaultValue && (
                   <Field.Root name="defaultValue">
