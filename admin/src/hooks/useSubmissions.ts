@@ -61,7 +61,7 @@ export const useSubmissions = (
   formId: string,
   initialQueryParams?: SubmissionsQueryParams
 ): UseSubmissionsReturn => {
-  const { get, put, del } = useFetchClient();
+  const { get, post, put, del } = useFetchClient();
   const [submissions, setSubmissions] = useState<FormSubmission[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -217,24 +217,17 @@ export const useSubmissions = (
 
       setIsDeleting(true);
       try {
-        // Single batch request to the server's deleteMany endpoint.
-        // `useFetchClient`'s `del` cannot carry a request body, so use the
-        // native-fetch helper which sends `{ ids }` as the DELETE payload.
-        // `rawRequest` throws (with the server's message) on a non-ok response.
-        const response = await rawRequest(API.submissions(formId), {
-          method: 'DELETE',
-          body: { ids: documentIds },
-        });
+        // Single batch request to the server's bulk-delete endpoint. This is a
+        // POST (not DELETE) because Koa does not parse a DELETE request body, so
+        // `{ ids }` must travel as a POST payload. Going through `useFetchClient`'s
+        // `post` also routes this through Strapi's auth/refresh lifecycle.
+        const response = await post<ApiResponse<{ success?: boolean; deleted?: number }>>(
+          API.bulkDeleteSubmissions(formId),
+          { ids: documentIds }
+        );
 
-        let deletedCount = documentIds.length;
-        try {
-          const parsed = JSON.parse(response.text) as ApiResponse<{ deleted?: number }>;
-          if (typeof parsed?.data?.deleted === 'number') {
-            deletedCount = parsed.data.deleted;
-          }
-        } catch {
-          // Fall back to the requested count if the body is not JSON.
-        }
+        const reported = response.data?.data?.deleted;
+        const deletedCount = typeof reported === 'number' ? reported : documentIds.length;
 
         const idSet = new Set(documentIds);
         setSubmissions((prev) => prev.filter((sub) => !idSet.has(sub.documentId)));
@@ -245,7 +238,7 @@ export const useSubmissions = (
         setIsDeleting(false);
       }
     },
-    [formId, reconcileAfterDelete]
+    [post, formId, reconcileAfterDelete]
   );
 
   const bulkUpdateStatus = useCallback(
@@ -292,9 +285,13 @@ export const useSubmissions = (
   /**
    * Export submissions as CSV or JSON. Triggers a file download in the browser.
    *
-   * The export endpoint returns a raw text/csv (or JSON text) body, so the
-   * request asks for a `text` response type and builds the Blob from the
-   * returned string rather than letting the fetch client parse JSON.
+   * The export endpoint returns a raw text/csv (or JSON text) body. We must use
+   * `rawRequest` here rather than `useFetchClient`: the latter always calls
+   * `response.json()` and, for a `text/csv` body, swallows the resulting
+   * SyntaxError and returns `data: []` — discarding the export. It also exposes
+   * no `responseType`/`text` option (see {@link rawRequest}). The trade-off is
+   * that `rawRequest` does not share Strapi's 401-refresh lifecycle, so an
+   * expired token surfaces a clear "session expired, reload" error here.
    */
   const exportSubmissions = useCallback(
     async (
@@ -317,7 +314,8 @@ export const useSubmissions = (
 
         // `useFetchClient` always JSON-parses the response body, which would
         // discard a `text/csv` export, so request the raw text via native fetch.
-        // `rawRequest` throws (with the server's message) on a non-ok response.
+        // `rawRequest` throws on a non-ok response (the server's message, or a
+        // clear "session expired" message on a 401 token-expiry).
         const response = await rawRequest(
           `${API.exportSubmissions(formId)}?${params.toString()}`,
           {
