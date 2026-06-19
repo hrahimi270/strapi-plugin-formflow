@@ -247,6 +247,12 @@ export interface FormField {
   width?: 'full' | 'half';
   conditional?: ConditionalRule;
   attributes?: Record<string, unknown>;
+  /**
+   * When true, this field is omitted from CSV/JSON submission exports (e.g.
+   * sensitive values such as passwords or tokens). Defaults to false/absent, so
+   * existing fields continue to be exported.
+   */
+  excludeFromExport?: boolean;
 }
 
 /**

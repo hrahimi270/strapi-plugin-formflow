@@ -94,6 +94,13 @@ export interface FormSettings {
     events: Array<'submission.created' | 'submission.updated'>;
   }>;
   spam: SpamProtectionConfig;
+  /**
+   * Optional raw CSS the consuming frontend may inject when rendering the form
+   * (e.g. into a <style> tag). Exposed verbatim through the public schema; the
+   * server never interprets it. Empty by default so existing forms are
+   * unaffected.
+   */
+  customCss?: string;
 }
 
 const CONTENT_TYPE_UID = 'plugin::strapi-forms.form';
@@ -359,6 +366,10 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         ...(settings.layout === 'multi-step' && settings.steps
           ? { steps: settings.steps }
           : {}),
+        // Expose custom CSS only when set so the consuming frontend can inject
+        // it (e.g. into a <style> tag). Omitted entirely when empty, keeping the
+        // response shape unchanged for existing forms.
+        ...(settings.customCss ? { customCss: settings.customCss } : {}),
         spam: {
           honeypot: settings.spam?.honeypot || false,
           honeypotFieldName: settings.spam?.honeypotFieldName,
@@ -391,6 +402,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         honeypot: true,
         honeypotFieldName: '_gotcha',
       },
+      customCss: '',
     };
   },
 

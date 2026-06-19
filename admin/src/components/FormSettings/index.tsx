@@ -13,6 +13,7 @@ import {
   Grid,
 } from '@strapi/design-system';
 import { useIntl } from 'react-intl';
+import styled from 'styled-components';
 
 import { getTranslation } from '../../utils/getTranslation';
 import type {
@@ -41,6 +42,14 @@ const getDefaultSpamSettings = (): SpamSettingsType => ({
   honeypot: true,
   honeypotFieldName: '_gotcha',
 });
+
+/**
+ * Monospace textarea for the Custom CSS editor so authored CSS is legible.
+ */
+const MonospaceTextarea = styled(Textarea)`
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  min-height: 12rem;
+`;
 
 /**
  * A titled settings section rendered inside a native card container.
@@ -316,6 +325,43 @@ export const FormSettings = ({
           })}
         >
           <RateLimitSettings rateLimit={settings.rateLimit} onChange={handleRateLimitChange} />
+        </SettingsSection>
+
+        <Divider />
+
+        {/* Custom CSS Section */}
+        <SettingsSection
+          title={formatMessage({
+            id: getTranslation('settings.customCss.title'),
+            defaultMessage: 'Custom CSS',
+          })}
+        >
+          <Field.Root
+            name="customCss"
+            hint={formatMessage({
+              id: getTranslation('settings.customCss.hint'),
+              defaultMessage:
+                'Exposed in the public form schema and injected by the consuming frontend when rendering this form. Not applied inside the admin panel.',
+            })}
+          >
+            <Field.Label>
+              {formatMessage({
+                id: getTranslation('settings.customCss.label'),
+                defaultMessage: 'Custom CSS',
+              })}
+            </Field.Label>
+            <MonospaceTextarea
+              value={settings.customCss || ''}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                updateSetting('customCss', e.target.value)
+              }
+              placeholder={formatMessage({
+                id: getTranslation('settings.customCss.placeholder'),
+                defaultMessage: '.my-form { /* your styles */ }',
+              })}
+            />
+            <Field.Hint />
+          </Field.Root>
         </SettingsSection>
       </Flex>
     </Box>
