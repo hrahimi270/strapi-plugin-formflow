@@ -123,6 +123,23 @@ const getChoiceLabels = (
   return values.map((v) => getOptionLabel(v, field));
 };
 
+/**
+ * A stored file-field value is a media reference (or an array of them) shaped
+ * like { id, url, name, mime?, size? }, produced when files are uploaded on
+ * submission. Normalize either form to the refs we can render as links.
+ */
+interface MediaRef {
+  url?: string;
+  name?: string;
+}
+const asMediaRefs = (value: unknown): MediaRef[] => {
+  const arr = Array.isArray(value) ? value : [value];
+  return arr.filter(
+    (v): v is MediaRef =>
+      typeof v === 'object' && v !== null && typeof (v as MediaRef).url === 'string'
+  );
+};
+
 interface MetadataItemProps {
   label: string;
   children: React.ReactNode;
@@ -263,6 +280,24 @@ export const SubmissionDetailPage = () => {
         <Typography textColor="neutral800">
           {choiceLabels.length === 0 ? '—' : choiceLabels.join(', ')}
         </Typography>
+      );
+    }
+
+    // File fields store a media reference (or an array of them); render each as
+    // a link to the uploaded file rather than dumping the raw object as JSON.
+    if (fieldType === 'file') {
+      const files = asMediaRefs(value);
+      if (files.length === 0) {
+        return <Typography textColor="neutral400">—</Typography>;
+      }
+      return (
+        <Flex direction="column" alignItems="flex-start" gap={1}>
+          {files.map((file, index) => (
+            <Link key={index} href={file.url} isExternal>
+              {file.name || file.url}
+            </Link>
+          ))}
+        </Flex>
       );
     }
 

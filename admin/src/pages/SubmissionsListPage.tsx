@@ -88,6 +88,24 @@ const formatDate = (dateStr: string): string => {
  * `label` via the form's field definitions, falling back to the raw key when no
  * matching field is found (e.g. legacy data or a field removed from the form).
  */
+/**
+ * Render a stored value to a short preview string. File-field values are media
+ * references ({ url, name, ... }) or arrays of them — show the file name(s)
+ * rather than a raw JSON blob.
+ */
+const previewValue = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return value.map(previewValue).join(', ');
+  }
+  if (value && typeof value === 'object') {
+    const ref = value as { name?: unknown; url?: unknown };
+    if (typeof ref.name === 'string') return ref.name;
+    if (typeof ref.url === 'string') return ref.url;
+    return JSON.stringify(value);
+  }
+  return String(value);
+};
+
 const getPreview = (data: Record<string, unknown>, fields?: FormField[]): string => {
   const labelByName = new Map((fields ?? []).map((f) => [f.name, f.label]));
 
@@ -102,7 +120,7 @@ const getPreview = (data: Record<string, unknown>, fields?: FormField[]): string
   return entries
     .map(([key, value]) => {
       const label = labelByName.get(key) || key;
-      const strValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      const strValue = previewValue(value);
       const truncated = strValue.length > 30 ? `${strValue.slice(0, 30)}...` : strValue;
       return `${label}: ${truncated}`;
     })
