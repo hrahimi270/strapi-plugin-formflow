@@ -22,11 +22,13 @@ import {
   BackButton,
   ConfirmDialog,
   useNotification,
+  useRBAC,
 } from '@strapi/strapi/admin';
 
 import { useSubmission } from '../hooks';
 import { PLUGIN_ID } from '../pluginId';
 import { getTranslation } from '../utils/getTranslation';
+import { SUBMISSION_PERMISSIONS } from '../permissions';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { SubmissionStatus, FormField } from '../utils/api';
 
@@ -163,6 +165,11 @@ export const SubmissionDetailPage = () => {
 
   const { submission, isLoading, isUpdating, error, updateStatus, deleteSubmission } =
     useSubmission(id);
+
+  // Gate the status change (update) and delete actions. Super-admins pass all.
+  const {
+    allowedActions: { canUpdate, canDelete },
+  } = useRBAC(SUBMISSION_PERMISSIONS);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
@@ -314,13 +321,15 @@ export const SubmissionDetailPage = () => {
           })
         }
         primaryAction={
-          <Button
-            variant="danger-light"
-            startIcon={<Trash />}
-            onClick={() => setDeleteDialogOpen(true)}
-          >
-            {formatMessage({ id: getTranslation('common.delete'), defaultMessage: 'Delete' })}
-          </Button>
+          canDelete ? (
+            <Button
+              variant="danger-light"
+              startIcon={<Trash />}
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              {formatMessage({ id: getTranslation('common.delete'), defaultMessage: 'Delete' })}
+            </Button>
+          ) : null
         }
       />
       <Layouts.Content>
@@ -387,7 +396,7 @@ export const SubmissionDetailPage = () => {
                     <SingleSelect
                       value={submission.status}
                       onChange={handleStatusChange}
-                      disabled={isUpdating}
+                      disabled={isUpdating || !canUpdate}
                     >
                       {STATUS_OPTIONS.map((option) => (
                         <SingleSelectOption key={option.value} value={option.value}>

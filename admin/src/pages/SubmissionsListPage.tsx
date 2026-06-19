@@ -33,12 +33,14 @@ import {
   ConfirmDialog,
   useNotification,
   useQueryParams,
+  useRBAC,
 } from '@strapi/strapi/admin';
 
 import { useSubmissions } from '../hooks/useSubmissions';
 import { useForm } from '../hooks/useForm';
 import { PLUGIN_ID } from '../pluginId';
 import { getTranslation } from '../utils/getTranslation';
+import { SUBMISSION_PERMISSIONS } from '../permissions';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { SubmissionStatus, ExportFormat, FormField } from '../utils/api';
 
@@ -166,6 +168,11 @@ const SubmissionsView = ({
   const navigate = useNavigate();
   const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
+
+  // Gate submission write/export actions. Super-admins pass all checks.
+  const {
+    allowedActions: { canUpdate, canDelete, canExport },
+  } = useRBAC(SUBMISSION_PERMISSIONS);
 
   const {
     submissions,
@@ -382,6 +389,9 @@ const SubmissionsView = ({
   const numberOfSubmissions = submissions.length;
   const isAllSelected = selectedIds.length === numberOfSubmissions && numberOfSubmissions > 0;
   const isIndeterminate = selectedIds.length > 0 && selectedIds.length < numberOfSubmissions;
+  // Row selection only matters if the user can act on the selection (bulk
+  // status update or bulk delete). Hide it entirely for read-only viewers.
+  const canSelect = canUpdate || canDelete;
 
   return (
     <Page.Main>
@@ -399,34 +409,36 @@ const SubmissionsView = ({
               })
         }
         primaryAction={
-          <Menu.Root>
-            <Menu.Trigger
-              variant="secondary"
-              startIcon={<Download />}
-              endIcon={<CaretDown />}
-              loading={isExporting}
-              disabled={numberOfSubmissions === 0}
-            >
-              {formatMessage({
-                id: getTranslation('submissions.export'),
-                defaultMessage: 'Export',
-              })}
-            </Menu.Trigger>
-            <Menu.Content>
-              <Menu.Item onSelect={() => handleExport('csv')}>
+          canExport ? (
+            <Menu.Root>
+              <Menu.Trigger
+                variant="secondary"
+                startIcon={<Download />}
+                endIcon={<CaretDown />}
+                loading={isExporting}
+                disabled={numberOfSubmissions === 0}
+              >
                 {formatMessage({
-                  id: getTranslation('submissions.export.csv'),
-                  defaultMessage: 'Export as CSV',
+                  id: getTranslation('submissions.export'),
+                  defaultMessage: 'Export',
                 })}
-              </Menu.Item>
-              <Menu.Item onSelect={() => handleExport('json')}>
-                {formatMessage({
-                  id: getTranslation('submissions.export.json'),
-                  defaultMessage: 'Export as JSON',
-                })}
-              </Menu.Item>
-            </Menu.Content>
-          </Menu.Root>
+              </Menu.Trigger>
+              <Menu.Content>
+                <Menu.Item onSelect={() => handleExport('csv')}>
+                  {formatMessage({
+                    id: getTranslation('submissions.export.csv'),
+                    defaultMessage: 'Export as CSV',
+                  })}
+                </Menu.Item>
+                <Menu.Item onSelect={() => handleExport('json')}>
+                  {formatMessage({
+                    id: getTranslation('submissions.export.json'),
+                    defaultMessage: 'Export as JSON',
+                  })}
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Root>
+          ) : null
         }
       />
 
@@ -444,36 +456,42 @@ const SubmissionsView = ({
                   { count: selectedIds.length }
                 )}
               </Typography>
-              <Button
-                variant="secondary"
-                startIcon={<CheckCircle />}
-                onClick={() => handleBulkStatus('read')}
-                loading={isUpdating}
-              >
-                {formatMessage({
-                  id: getTranslation('submissions.bulk.markRead'),
-                  defaultMessage: 'Mark as read',
-                })}
-              </Button>
-              <Button
-                variant="secondary"
-                startIcon={<Archive />}
-                onClick={() => handleBulkStatus('archived')}
-                loading={isUpdating}
-              >
-                {formatMessage({
-                  id: getTranslation('submissions.bulk.markArchived'),
-                  defaultMessage: 'Mark as archived',
-                })}
-              </Button>
-              <Button
-                variant="danger-light"
-                startIcon={<Trash />}
-                onClick={() => setBulkDeleteOpen(true)}
-                loading={isDeleting}
-              >
-                {formatMessage({ id: getTranslation('common.delete'), defaultMessage: 'Delete' })}
-              </Button>
+              {canUpdate && (
+                <Button
+                  variant="secondary"
+                  startIcon={<CheckCircle />}
+                  onClick={() => handleBulkStatus('read')}
+                  loading={isUpdating}
+                >
+                  {formatMessage({
+                    id: getTranslation('submissions.bulk.markRead'),
+                    defaultMessage: 'Mark as read',
+                  })}
+                </Button>
+              )}
+              {canUpdate && (
+                <Button
+                  variant="secondary"
+                  startIcon={<Archive />}
+                  onClick={() => handleBulkStatus('archived')}
+                  loading={isUpdating}
+                >
+                  {formatMessage({
+                    id: getTranslation('submissions.bulk.markArchived'),
+                    defaultMessage: 'Mark as archived',
+                  })}
+                </Button>
+              )}
+              {canDelete && (
+                <Button
+                  variant="danger-light"
+                  startIcon={<Trash />}
+                  onClick={() => setBulkDeleteOpen(true)}
+                  loading={isDeleting}
+                >
+                  {formatMessage({ id: getTranslation('common.delete'), defaultMessage: 'Delete' })}
+                </Button>
+              )}
             </>
           }
         />
@@ -524,30 +542,35 @@ const SubmissionsView = ({
               </SingleSelect>
             </Field.Root>
 
-            <Field.Root name="include-ip">
-              <Flex gap={2} alignItems="center" paddingBottom={2}>
-                <Switch
-                  checked={includeIp}
-                  onCheckedChange={(checked: boolean) => setIncludeIp(checked)}
-                  onLabel={formatMessage({ id: getTranslation('common.on'), defaultMessage: 'On' })}
-                  offLabel={formatMessage({
-                    id: getTranslation('common.off'),
-                    defaultMessage: 'Off',
-                  })}
-                  aria-label={formatMessage({
-                    id: getTranslation('submissions.export.includeIp'),
-                    defaultMessage: 'Include IP address in export',
-                  })}
-                  visibleLabels
-                />
-                <Typography variant="pi" textColor="neutral600">
-                  {formatMessage({
-                    id: getTranslation('submissions.export.includeIp'),
-                    defaultMessage: 'Include IP address in export',
-                  })}
-                </Typography>
-              </Flex>
-            </Field.Root>
+            {canExport && (
+              <Field.Root name="include-ip">
+                <Flex gap={2} alignItems="center" paddingBottom={2}>
+                  <Switch
+                    checked={includeIp}
+                    onCheckedChange={(checked: boolean) => setIncludeIp(checked)}
+                    onLabel={formatMessage({
+                      id: getTranslation('common.on'),
+                      defaultMessage: 'On',
+                    })}
+                    offLabel={formatMessage({
+                      id: getTranslation('common.off'),
+                      defaultMessage: 'Off',
+                    })}
+                    aria-label={formatMessage({
+                      id: getTranslation('submissions.export.includeIp'),
+                      defaultMessage: 'Include IP address in export',
+                    })}
+                    visibleLabels
+                  />
+                  <Typography variant="pi" textColor="neutral600">
+                    {formatMessage({
+                      id: getTranslation('submissions.export.includeIp'),
+                      defaultMessage: 'Include IP address in export',
+                    })}
+                  </Typography>
+                </Flex>
+              </Field.Root>
+            )}
             </Flex>
           }
         />
@@ -567,14 +590,16 @@ const SubmissionsView = ({
               <Thead>
                 <Tr>
                   <Th>
-                    <Checkbox
-                      aria-label={formatMessage({
-                        id: getTranslation('common.selectAll'),
-                        defaultMessage: 'Select all entries',
-                      })}
-                      checked={isIndeterminate ? 'indeterminate' : isAllSelected}
-                      onCheckedChange={toggleAll}
-                    />
+                    {canSelect ? (
+                      <Checkbox
+                        aria-label={formatMessage({
+                          id: getTranslation('common.selectAll'),
+                          defaultMessage: 'Select all entries',
+                        })}
+                        checked={isIndeterminate ? 'indeterminate' : isAllSelected}
+                        onCheckedChange={toggleAll}
+                      />
+                    ) : null}
                   </Th>
                   <Th>
                     <Typography variant="sigma" textColor="neutral600">
@@ -618,14 +643,16 @@ const SubmissionsView = ({
                     style={{ cursor: 'pointer' }}
                   >
                     <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                      <Checkbox
-                        aria-label={`${formatMessage({
-                          id: getTranslation('common.select'),
-                          defaultMessage: 'Select',
-                        })} ${submission.documentId}`}
-                        checked={selectedIds.includes(submission.documentId)}
-                        onCheckedChange={() => toggleSelection(submission.documentId)}
-                      />
+                      {canSelect ? (
+                        <Checkbox
+                          aria-label={`${formatMessage({
+                            id: getTranslation('common.select'),
+                            defaultMessage: 'Select',
+                          })} ${submission.documentId}`}
+                          checked={selectedIds.includes(submission.documentId)}
+                          onCheckedChange={() => toggleSelection(submission.documentId)}
+                        />
+                      ) : null}
                     </Td>
                     <Td>
                       <StatusBadge status={submission.status} />
@@ -652,16 +679,18 @@ const SubmissionsView = ({
                         >
                           <Eye />
                         </IconButton>
-                        <IconButton
-                          label={formatMessage({
-                            id: getTranslation('submissions.action.delete'),
-                            defaultMessage: 'Delete submission',
-                          })}
-                          onClick={() => setDeletingId(submission.documentId)}
-                          variant="ghost"
-                        >
-                          <Trash />
-                        </IconButton>
+                        {canDelete && (
+                          <IconButton
+                            label={formatMessage({
+                              id: getTranslation('submissions.action.delete'),
+                              defaultMessage: 'Delete submission',
+                            })}
+                            onClick={() => setDeletingId(submission.documentId)}
+                            variant="ghost"
+                          >
+                            <Trash />
+                          </IconButton>
+                        )}
                       </Flex>
                     </Td>
                   </Tr>

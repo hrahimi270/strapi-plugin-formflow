@@ -30,10 +30,12 @@ import {
   ConfirmDialog,
   useNotification,
   useQueryParams,
+  useRBAC,
 } from '@strapi/strapi/admin';
 
 import { useForms } from '../hooks';
 import { getTranslation } from '../utils/getTranslation';
+import { FORM_PERMISSIONS, SUBMISSION_PERMISSIONS } from '../permissions';
 import type { Form, FormsQueryParams } from '../utils/api';
 
 /**
@@ -53,6 +55,17 @@ export const FormsListPage = () => {
 
   const queryParams: FormsQueryParams = { _q: search };
   const { forms, isLoading, error, deleteForm, duplicateForm } = useForms(queryParams);
+
+  // Gate write actions by the user's form permissions. `duplicate` reuses the
+  // create permission (it creates a new form). Super-admins pass all checks.
+  const {
+    allowedActions: { canCreate, canUpdate, canDelete },
+  } = useRBAC(FORM_PERMISSIONS);
+  // Viewing submissions requires the submission-read permission (checked here so
+  // the action is hidden up front; the submissions page also enforces it).
+  const {
+    allowedActions: { canRead: canReadSubmissions },
+  } = useRBAC(SUBMISSION_PERMISSIONS);
 
   // Delete confirmation state
   const [formToDelete, setFormToDelete] = useState<Form | null>(null);
@@ -152,12 +165,14 @@ export const FormsListPage = () => {
           defaultMessage: 'Create and manage your forms',
         })}
         primaryAction={
-          <Button startIcon={<Plus />} onClick={handleCreateForm}>
-            {formatMessage({
-              id: getTranslation('forms.create'),
-              defaultMessage: 'Create form',
-            })}
-          </Button>
+          canCreate ? (
+            <Button startIcon={<Plus />} onClick={handleCreateForm}>
+              {formatMessage({
+                id: getTranslation('forms.create'),
+                defaultMessage: 'Create form',
+              })}
+            </Button>
+          ) : null
         }
       />
       <Layouts.Action
@@ -180,12 +195,14 @@ export const FormsListPage = () => {
             colCount={5}
             rowCount={numberOfForms + 1}
             footer={
-              <TFooter onClick={handleCreateForm} icon={<Plus />}>
-                {formatMessage({
-                  id: getTranslation('forms.create'),
-                  defaultMessage: 'Create form',
-                })}
-              </TFooter>
+              canCreate ? (
+                <TFooter onClick={handleCreateForm} icon={<Plus />}>
+                  {formatMessage({
+                    id: getTranslation('forms.create'),
+                    defaultMessage: 'Create form',
+                  })}
+                </TFooter>
+              ) : undefined
             }
           >
             <Thead>
@@ -236,8 +253,8 @@ export const FormsListPage = () => {
               {forms.map((form) => (
                 <Tr
                   key={form.documentId}
-                  onClick={() => handleEditForm(form)}
-                  style={{ cursor: 'pointer' }}
+                  onClick={canUpdate ? () => handleEditForm(form) : undefined}
+                  style={canUpdate ? { cursor: 'pointer' } : undefined}
                 >
                   <Td>
                     <Typography fontWeight="bold" textColor="neutral800">
@@ -267,47 +284,55 @@ export const FormsListPage = () => {
                   </Td>
                   <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                     <Flex gap={1} justifyContent="flex-end">
-                      <IconButton
-                        label={formatMessage({
-                          id: getTranslation('forms.action.viewSubmissions'),
-                          defaultMessage: 'View submissions',
-                        })}
-                        onClick={() => handleViewSubmissions(form)}
-                        variant="ghost"
-                      >
-                        <Eye />
-                      </IconButton>
-                      <IconButton
-                        label={formatMessage({
-                          id: getTranslation('forms.action.edit'),
-                          defaultMessage: 'Edit form',
-                        })}
-                        onClick={() => handleEditForm(form)}
-                        variant="ghost"
-                      >
-                        <Pencil />
-                      </IconButton>
-                      <IconButton
-                        label={formatMessage({
-                          id: getTranslation('forms.action.duplicate'),
-                          defaultMessage: 'Duplicate form',
-                        })}
-                        onClick={() => handleDuplicateForm(form)}
-                        variant="ghost"
-                        disabled={isDuplicating === form.documentId}
-                      >
-                        <Duplicate />
-                      </IconButton>
-                      <IconButton
-                        label={formatMessage({
-                          id: getTranslation('forms.action.delete'),
-                          defaultMessage: 'Delete form',
-                        })}
-                        onClick={() => setFormToDelete(form)}
-                        variant="ghost"
-                      >
-                        <Trash />
-                      </IconButton>
+                      {canReadSubmissions && (
+                        <IconButton
+                          label={formatMessage({
+                            id: getTranslation('forms.action.viewSubmissions'),
+                            defaultMessage: 'View submissions',
+                          })}
+                          onClick={() => handleViewSubmissions(form)}
+                          variant="ghost"
+                        >
+                          <Eye />
+                        </IconButton>
+                      )}
+                      {canUpdate && (
+                        <IconButton
+                          label={formatMessage({
+                            id: getTranslation('forms.action.edit'),
+                            defaultMessage: 'Edit form',
+                          })}
+                          onClick={() => handleEditForm(form)}
+                          variant="ghost"
+                        >
+                          <Pencil />
+                        </IconButton>
+                      )}
+                      {canCreate && (
+                        <IconButton
+                          label={formatMessage({
+                            id: getTranslation('forms.action.duplicate'),
+                            defaultMessage: 'Duplicate form',
+                          })}
+                          onClick={() => handleDuplicateForm(form)}
+                          variant="ghost"
+                          disabled={isDuplicating === form.documentId}
+                        >
+                          <Duplicate />
+                        </IconButton>
+                      )}
+                      {canDelete && (
+                        <IconButton
+                          label={formatMessage({
+                            id: getTranslation('forms.action.delete'),
+                            defaultMessage: 'Delete form',
+                          })}
+                          onClick={() => setFormToDelete(form)}
+                          variant="ghost"
+                        >
+                          <Trash />
+                        </IconButton>
+                      )}
                     </Flex>
                   </Td>
                 </Tr>
@@ -333,17 +358,19 @@ export const FormsListPage = () => {
               defaultMessage: 'Create your first form to start collecting submissions',
             })}
             action={
-              <LinkButton
-                tag={NavLink}
-                to="forms/create"
-                variant="secondary"
-                startIcon={<Plus />}
-              >
-                {formatMessage({
-                  id: getTranslation('forms.create'),
-                  defaultMessage: 'Create form',
-                })}
-              </LinkButton>
+              canCreate ? (
+                <LinkButton
+                  tag={NavLink}
+                  to="forms/create"
+                  variant="secondary"
+                  startIcon={<Plus />}
+                >
+                  {formatMessage({
+                    id: getTranslation('forms.create'),
+                    defaultMessage: 'Create form',
+                  })}
+                </LinkButton>
+              ) : null
             }
           />
         )}
