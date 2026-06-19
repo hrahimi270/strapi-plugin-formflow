@@ -34,6 +34,14 @@ export interface SubmissionFileRef {
 const SUBMISSION_CONTENT_TYPE_UID = 'plugin::strapi-forms.form-submission';
 
 /**
+ * Request-body control field used to request validate-only, step-scoped
+ * validation for a multi-step form. Its value is a step id or a zero-based step
+ * index. It is a control field (never a real form field) and is always stripped
+ * from submission data before validation/storage, like the honeypot field.
+ */
+export const STEP_INDICATOR_FIELD = '_step';
+
+/**
  * Submission status values
  */
 export type SubmissionStatus = 'new' | 'read' | 'processed' | 'archived' | 'spam';
@@ -99,6 +107,28 @@ class ValidationError extends Error {
 }
 
 /**
+ * Multi-step form step definition. `fields` holds the stable field IDs that
+ * belong to the step (matching `FormField.id`), NOT field names.
+ */
+export interface FormStepDefinition {
+  id: string;
+  title?: string;
+  description?: string;
+  fields: string[];
+}
+
+/**
+ * Result of a validate-only step check. Reports validity and field-level errors
+ * for the requested step WITHOUT persisting any submission. `step` echoes the
+ * resolved step id (or the raw indicator when a step could not be resolved).
+ */
+export interface StepValidationResult {
+  valid: boolean;
+  errors: Record<string, string[]>;
+  step: string;
+}
+
+/**
  * Form structure for submission processing
  */
 export interface SubmittableForm {
@@ -108,6 +138,8 @@ export interface SubmittableForm {
   isActive: boolean;
   fields: ValidatableField[];
   settings?: {
+    layout?: 'single' | 'multi-step';
+    steps?: FormStepDefinition[];
     spam?: {
       honeypot?: boolean;
       honeypotFieldName?: string;
@@ -173,6 +205,11 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     // Create a mutable copy of submission data
     const submissionData = { ...data };
+
+    // Strip the step-indicator control field. It is only meaningful for the
+    // validate-only step check (see validateStep) and must never be validated
+    // against form fields or persisted, even if a full submission includes it.
+    delete submissionData[STEP_INDICATOR_FIELD];
 
     // Spam handling (honeypot + reCAPTCHA) lives in the spam-check middleware,
     // which runs before this controller/service. Defensively strip the honeypot
@@ -240,6 +277,118 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       successMessage: form.successMessage || 'Thank you for your submission',
       redirectUrl: form.redirectUrl,
     };
+  },
+
+  /**
+   * Validate a SINGLE step of a multi-step form WITHOUT persisting anything.
+   *
+   * This is the step-aware counterpart to {@link submit}: it powers per-step
+   * (wizard) validation so a frontend can confirm a step is valid before letting
+   * the user advance. It is VALIDATION-ONLY — no submission is ever created,
+   * no files are uploaded, no hooks fire, and the submission count is untouched.
+   * Persistence happens exclusively through a full {@link submit} call (one with
+   * no step indicator).
+   *
+   * Only the non-file fields whose ids/names belong to the requested step are
+   * checked, reusing the same per-field logic as a full submission (conditional
+   * visibility against the full data, required, rules, type, options). File
+   * fields are intentionally not validated here (uploads are deferred to the
+   * final submit). The returned errors use the identical
+   * `{ valid, errors }` shape as full validation (errors keyed by field name),
+   * with an added `step` echoing the resolved step id.
+   *
+   * @param slug - Form slug identifier
+   * @param data - Raw submission data accumulated so far (keyed by field name)
+   * @param stepIndicator - Step id or zero-based step index to validate
+   * @returns StepValidationResult (valid flag + field errors + resolved step)
+   * @throws Error if the form is not found, inactive, not multi-step, or the
+   *   step indicator cannot be resolved to a defined step
+   */
+  async validateStep(
+    slug: string,
+    data: Record<string, unknown>,
+    stepIndicator: string | number
+  ): Promise<StepValidationResult> {
+    const formService = strapi.plugin('strapi-forms').service('form');
+    const validationService = strapi.plugin('strapi-forms').service('validation');
+
+    const form = (await formService.findBySlug(slug)) as SubmittableForm | null;
+
+    if (!form) {
+      throw new Error('Form not found');
+    }
+
+    if (!form.isActive) {
+      throw new Error('Form is not accepting submissions');
+    }
+
+    const settings = form.settings;
+    const steps = settings?.steps;
+
+    // Step validation only applies to multi-step forms with defined steps.
+    if (settings?.layout !== 'multi-step' || !steps?.length) {
+      throw new Error('Form is not multi-step');
+    }
+
+    const step = this.resolveStep(steps, stepIndicator);
+
+    if (!step) {
+      throw new Error('Step not found');
+    }
+
+    // Work on a copy with control/spam fields stripped, mirroring submit().
+    const submissionData = { ...data };
+    delete submissionData[STEP_INDICATOR_FIELD];
+
+    if (settings?.spam?.honeypot) {
+      const honeypotFieldName = settings.spam.honeypotFieldName || '_gotcha';
+      delete submissionData[honeypotFieldName];
+    }
+
+    // Validate only the fields belonging to this step. Step membership is keyed
+    // by stable field id; validateSubset also matches by name defensively.
+    const validationResult = validationService.validateSubset(
+      form.fields || [],
+      step.fields || [],
+      submissionData
+    );
+
+    return {
+      valid: validationResult.valid,
+      errors: validationResult.errors,
+      step: step.id,
+    };
+  },
+
+  /**
+   * Resolve a step indicator (a step id, or a zero-based index passed as a
+   * number or numeric string) to its {@link FormStepDefinition}.
+   *
+   * Id matching takes precedence over index so a purely-numeric step id is not
+   * accidentally treated as an index. Returns null when no step matches.
+   *
+   * @param steps - The form's defined steps
+   * @param indicator - Step id or zero-based index
+   */
+  resolveStep(
+    steps: FormStepDefinition[],
+    indicator: string | number
+  ): FormStepDefinition | null {
+    // Prefer an exact id match.
+    const byId = steps.find((s) => s.id === String(indicator));
+    if (byId) {
+      return byId;
+    }
+
+    // Fall back to a zero-based numeric index (number or numeric string).
+    if (typeof indicator === 'number' || /^\d+$/.test(String(indicator))) {
+      const index = Number(indicator);
+      if (Number.isInteger(index) && index >= 0 && index < steps.length) {
+        return steps[index];
+      }
+    }
+
+    return null;
   },
 
   /**

@@ -36,6 +36,13 @@ export interface ValidationRule {
  * Form field structure for validation purposes
  */
 export interface ValidatableField {
+  /**
+   * Stable field id (present on stored form fields). Used to resolve multi-step
+   * step membership, since `settings.steps[].fields` stores field IDs while
+   * submission data is keyed by field `name`. Optional so ad-hoc field lists
+   * (without ids) still validate by name.
+   */
+  id?: string;
   type: string;
   name: string;
   label: string;
@@ -138,6 +145,44 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       valid: Object.keys(errors).length === 0,
       errors,
     };
+  },
+
+  /**
+   * Validate only a SUBSET of a form's fields, identified by field id or name.
+   *
+   * Used by step-aware (multi-step) validation: only the fields belonging to a
+   * single wizard step are checked, so the frontend can validate one step at a
+   * time before the user advances. The filtered subset is then run through the
+   * identical per-field logic as {@link validate} (conditional visibility,
+   * required, custom rules, type checks, option whitelist), guaranteeing the
+   * per-step pass behaves exactly like the corresponding fields would in a full
+   * submission.
+   *
+   * Matching: a field is included when its `id` OR its `name` is present in
+   * `fieldKeys`. Step definitions store field IDs (`settings.steps[].fields`),
+   * but matching on name as well keeps the helper usable with name-based lists.
+   * Conditional visibility is still evaluated against the FULL `data` object, so
+   * a step field that depends on a value entered on an earlier step is resolved
+   * correctly.
+   *
+   * @param fields - Full array of form field definitions
+   * @param fieldKeys - Field ids and/or names that belong to the subset
+   * @param data - Submission data to validate (full data, keyed by field name)
+   * @returns ValidationResult covering only the matched subset of fields
+   */
+  validateSubset(
+    fields: ValidatableField[],
+    fieldKeys: string[] | Set<string>,
+    data: Record<string, unknown>
+  ): ValidationResult {
+    const keySet = fieldKeys instanceof Set ? fieldKeys : new Set(fieldKeys);
+
+    const subset = fields.filter(
+      (field) => (field.id !== undefined && keySet.has(field.id)) || keySet.has(field.name)
+    );
+
+    // Reuse the exact full-form per-field logic on the filtered subset.
+    return this.validate(subset, data);
   },
 
   /**
