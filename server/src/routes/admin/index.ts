@@ -94,8 +94,12 @@ export default {
       },
     },
     {
-      method: 'DELETE',
-      path: '/forms/:formId/submissions',
+      // Bulk delete uses POST (not DELETE) because Koa/Strapi does not parse a
+      // request body on DELETE, so the { ids } payload would never reach the
+      // controller. Contract: POST /strapi-forms/forms/:formId/submissions/bulk-delete
+      // with body { ids: string[] } -> { data: { success, deleted } }.
+      method: 'POST',
+      path: '/forms/:formId/submissions/bulk-delete',
       handler: 'submission.deleteMany',
       config: {
         policies: [],
