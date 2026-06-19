@@ -172,6 +172,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
       : [];
 
     return strapi.documents(CONTENT_TYPE_UID).create({
+      status: 'published',
       data: {
         ...data,
         fields: processedFields,
@@ -212,6 +213,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     return strapi.documents(CONTENT_TYPE_UID).update({
       documentId,
+      status: 'published',
       data: processedData,
     });
   },
@@ -241,7 +243,42 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Duplicate an existing form with a new title and slug
+   * Generate a slug for a duplicated form that is unique across existing forms.
+   *
+   * Derives a base of `${original}-copy` and, if that is already taken, appends
+   * an incrementing suffix (`-copy-2`, `-copy-3`, ...) until a free slug is
+   * found. A null/empty base falls back to `form-copy`.
+   */
+  async generateUniqueSlug(baseSlug: string) {
+    const base = `${baseSlug || 'form'}-copy`;
+
+    let candidate = base;
+    let suffix = 2;
+
+    // Check against the draft version: every document has a draft row, so this
+    // reliably detects any existing form using the candidate slug.
+    while (
+      (
+        await strapi.documents(CONTENT_TYPE_UID).findMany({
+          filters: { slug: candidate },
+          status: 'draft',
+          limit: 1,
+        })
+      ).length > 0
+    ) {
+      candidate = `${base}-${suffix}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  },
+
+  /**
+   * Duplicate an existing form with a new title and a unique slug.
+   *
+   * create() does not backfill a slug, so we must generate one here; otherwise
+   * the copy is saved with slug:null, which breaks the editor and 404s the
+   * public API.
    */
   async duplicate(documentId: string) {
     const original = await this.findOne(documentId);
@@ -251,7 +288,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     // Extract only the data fields we need, excluding system fields
-    const { title, description, fields, settings, successMessage, redirectUrl, isActive } =
+    const { title, slug, description, fields, settings, successMessage, redirectUrl, isActive } =
       original;
 
     // Generate new field IDs for the duplicated form to ensure uniqueness
@@ -262,8 +299,11 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         }))
       : [];
 
+    const newSlug = await this.generateUniqueSlug(slug as string);
+
     return this.create({
       title: `${title} (Copy)`,
+      slug: newSlug,
       description,
       fields: duplicatedFields,
       settings: settings as Partial<FormSettings>,
