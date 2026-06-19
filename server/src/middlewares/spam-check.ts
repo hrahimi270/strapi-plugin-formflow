@@ -123,13 +123,16 @@ const spamCheck = (_config: unknown, { strapi }: { strapi: Core.Strapi }) => {
       if (typeof honeypotValue === 'string' ? honeypotValue.trim() !== '' : !!honeypotValue) {
         strapi.log.info(`[Strapi Forms] Honeypot triggered for form: ${slug}`);
 
-        // Silently pretend success without storing the submission.
+        // Silently pretend success without storing the submission. Mirror the
+        // real submit-success body EXACTLY (see public.submitForm) — same keys,
+        // including a normalized `redirectUrl` — so a bot cannot fingerprint the
+        // honeypot path by a missing key.
         ctx.status = 200;
         ctx.body = {
           data: {
             success: true,
             message: form.successMessage || 'Thank you for your submission',
-            ...(form.redirectUrl ? { redirectUrl: form.redirectUrl } : {}),
+            redirectUrl: form.redirectUrl ?? null,
           },
         };
         return;

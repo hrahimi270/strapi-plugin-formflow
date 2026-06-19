@@ -240,7 +240,9 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
         data: {
           success: true,
           message: result.successMessage,
-          redirectUrl: result.redirectUrl,
+          // Normalized to null when absent so the honeypot fake-success body
+          // (spam-check middleware) is byte-identical and not fingerprintable.
+          redirectUrl: result.redirectUrl ?? null,
         },
       };
     } catch (error) {
