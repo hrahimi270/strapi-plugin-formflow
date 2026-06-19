@@ -14,6 +14,10 @@ export const API = {
   submissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions`,
   submissionStats: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions/stats`,
   submission: (id: string) => `/${PLUGIN_ID}/submissions/${id}`,
+  // Batch delete is a POST (Koa does not parse a DELETE request body), so the
+  // ids travel in the JSON body of POST /forms/:formId/submissions/bulk-delete.
+  bulkDeleteSubmissions: (formId: string) =>
+    `/${PLUGIN_ID}/forms/${formId}/submissions/bulk-delete`,
   // NOTE: the export endpoint is nested under the submissions collection on the server
   // (GET /strapi-forms/forms/:formId/submissions/export).
   exportSubmissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions/export`,
@@ -26,10 +30,15 @@ export const API = {
  * Resolve the admin JWT the same way `@strapi/admin`'s fetch client does:
  * primarily from localStorage (`jwtToken`), falling back to a cookie.
  *
- * Used by {@link rawRequest} for the few calls that the standard
- * `useFetchClient` cannot perform (raw text/CSV downloads and a `DELETE`
- * carrying a request body), since that client always JSON-parses responses
- * and never sends a body on `DELETE`.
+ * Read fresh on every {@link rawRequest} call (never cached) so the latest token
+ * written by Strapi's session/refresh lifecycle is always used.
+ *
+ * Used by {@link rawRequest} for the one call the standard `useFetchClient`
+ * genuinely cannot perform: raw `text/csv` (or raw JSON text) exports. That
+ * client always JSON-parses the response body via `response.json()` and, for a
+ * `text/csv` body, swallows the resulting `SyntaxError` and returns `data: []`,
+ * discarding the export entirely. There is no `responseType`/`text` option on
+ * its `FetchOptions`, so a raw download must bypass it.
  */
 const getAdminToken = (): string | null => {
   try {
@@ -98,9 +107,16 @@ const extractErrorMessage = (text: string): string | undefined => {
 /**
  * Perform an authenticated request using the native `fetch` API and return the
  * raw response body as text. This intentionally bypasses `useFetchClient` for
- * the two cases it cannot handle:
- *  - downloading a `text/csv` (or raw JSON) export without JSON-parsing it
- *  - sending a `DELETE` with a JSON body (batch delete)
+ * the one case it cannot handle: downloading a `text/csv` (or raw JSON) export
+ * without JSON-parsing (and discarding) it.
+ *
+ * KNOWN LIMITATION: unlike `useFetchClient`, this path does not participate in
+ * Strapi's `401 -> refresh token -> retry` lifecycle — it attaches the token as
+ * read at call time. If that token has expired the request 401s with no retry.
+ * The freshest token is read on every call ({@link getAdminToken}), so this only
+ * bites when the token expires mid-session with no intervening admin call to
+ * refresh it. A `401` is surfaced as a clear, actionable error telling the user
+ * to reload (which reissues a fresh token), rather than a generic failure.
  *
  * Throws a descriptive `Error` when the admin token cannot be resolved (so the
  * request is never sent unauthenticated) and on any non-ok response, surfacing
@@ -112,7 +128,7 @@ export const rawRequest = async (
 ): Promise<RawRequestResult> => {
   const token = getAdminToken();
   if (!token) {
-    throw new Error('Not authenticated: missing admin session token');
+    throw new Error('Your session has expired. Please reload the page and try again.');
   }
 
   const headers: Record<string, string> = {
@@ -135,6 +151,13 @@ export const rawRequest = async (
   const text = await response.text();
 
   if (!response.ok) {
+    // A 401 here means the locally-read token expired; this raw path cannot
+    // refresh/retry the way `useFetchClient` does, so steer the user to the
+    // one action that reissues a valid token: reloading the page.
+    if (response.status === 401) {
+      throw new Error('Your session has expired. Please reload the page and try again.');
+    }
+
     const serverMessage = extractErrorMessage(text);
     throw new Error(
       serverMessage || `Request failed with status ${response.status}`
