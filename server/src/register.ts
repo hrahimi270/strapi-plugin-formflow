@@ -1,6 +1,68 @@
 import type { Core } from '@strapi/strapi';
 
 /**
+ * RBAC permission actions for the plugin.
+ *
+ * Registered with the admin permission `actionProvider`, which computes each
+ * action UID as `plugin::<pluginName>.<uid>` — so these become
+ * `plugin::strapi-forms.form.read`, `plugin::strapi-forms.submission.export`,
+ * etc. `section: 'plugins'` groups them under the "Forms" entry in
+ * Settings → Roles → (role) → Plugins. These UIDs MUST stay in sync with the
+ * route policies in `routes/admin/index.ts` and the admin permission constants
+ * in `admin/src/permissions.ts`.
+ */
+export const RBAC_ACTIONS = [
+  {
+    section: 'plugins',
+    displayName: 'Read forms',
+    uid: 'form.read',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Create forms',
+    uid: 'form.create',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Update forms',
+    uid: 'form.update',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Delete forms',
+    uid: 'form.delete',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Read submissions',
+    uid: 'submission.read',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Update submissions',
+    uid: 'submission.update',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Delete submissions',
+    uid: 'submission.delete',
+    pluginName: 'strapi-forms',
+  },
+  {
+    section: 'plugins',
+    displayName: 'Export submissions',
+    uid: 'submission.export',
+    pluginName: 'strapi-forms',
+  },
+];
+
+/**
  * OpenAPI fragment describing the plugin's public (content-api) endpoints.
  *
  * Note the plugin prefix: Strapi mounts plugin content-api routes under
@@ -178,7 +240,21 @@ const PUBLIC_API_OVERRIDE = {
   },
 };
 
-const register = ({ strapi }: { strapi: Core.Strapi }) => {
+const register = async ({ strapi }: { strapi: Core.Strapi }) => {
+  // Register the plugin's RBAC permission actions so they appear in
+  // Settings → Roles → Plugins → Forms and can gate the admin routes/UI.
+  // Wrapped defensively so a host/admin-service edge case never blocks plugin
+  // load (super-admins always pass `hasPermissions` regardless).
+  try {
+    await strapi.service('admin::permission').actionProvider.registerMany(RBAC_ACTIONS);
+  } catch (error) {
+    strapi.log.warn(
+      `[Strapi Forms] Failed to register RBAC permission actions: ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`
+    );
+  }
+
   // Register an OpenAPI override with @strapi/plugin-documentation (if present)
   // so the plugin's public endpoints appear in the host's generated spec with
   // correct paths/params/schemas. No-ops cleanly when the documentation plugin
