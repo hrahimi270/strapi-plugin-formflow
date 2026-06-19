@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Flex,
@@ -82,6 +82,23 @@ const generateFieldName = (label: string): string => {
 export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: FieldEditorProps) => {
   const { formatMessage } = useIntl();
 
+  // Tracks whether the user has manually edited the Name for the field currently
+  // being edited. `field.name` is the submission-data key, so once the user takes
+  // ownership of it we must stop auto-deriving it from the Label. We key the flag
+  // by field id (the modal is reused across fields) and reset it when the edited
+  // field changes. We do NOT persist this on the field itself because the field
+  // shape (utils/api.ts FormField) is owned by another stream.
+  const nameManuallyEditedRef = useRef(false);
+  const lastFieldIdRef = useRef<string | null>(null);
+  if (field && field.id !== lastFieldIdRef.current) {
+    lastFieldIdRef.current = field.id;
+    // A freshly created field starts as `field_<timestamp>` (auto). A field
+    // opened for re-edit whose name already diverged from its label slug is
+    // treated as user-owned so we never clobber an intentional key.
+    nameManuallyEditedRef.current =
+      !field.name.startsWith('field_') && field.name !== generateFieldName(field.label);
+  }
+
   // Determine field type characteristics
   const hasOptions = useMemo(() => field && CHOICE_FIELD_TYPES.includes(field.type), [field]);
   const isLayoutField = useMemo(() => field && LAYOUT_FIELD_TYPES.includes(field.type), [field]);
@@ -99,12 +116,23 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
     [allFields, field]
   );
 
-  // Handle label change with auto-name generation
+  // Handle label change with auto-name generation.
+  // Keep regenerating the name from the label as long as the name is still
+  // auto-derived. The name is auto-derived while the user has not manually
+  // edited it AND it is either still the default placeholder (`field_…`), empty,
+  // or exactly the slug of the previous label (which is what we just generated).
+  // This fixes the bug where only the first typed character survived because the
+  // old check (`name.startsWith('field_')`) stopped matching after one keystroke.
   const handleLabelChange = useCallback(
     (label: string) => {
       if (!field) return;
       const updates: Partial<FormField> = { label };
-      if (field.name.startsWith('field_')) {
+      const nameIsAutoDerived =
+        !nameManuallyEditedRef.current &&
+        (field.name === '' ||
+          field.name.startsWith('field_') ||
+          field.name === generateFieldName(field.label));
+      if (nameIsAutoDerived) {
         const generatedName = generateFieldName(label);
         updates.name = generatedName || `field_${Date.now()}`;
       }
@@ -113,9 +141,11 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
     [field, onChange]
   );
 
-  // Handle name change with sanitization
+  // Handle name change with sanitization. An explicit edit here means the user
+  // now owns the field key, so we stop auto-deriving it from the label.
   const handleNameChange = useCallback(
     (name: string) => {
+      nameManuallyEditedRef.current = true;
       const sanitizedName = name
         .toLowerCase()
         .replace(/[^a-z0-9_]/g, '_')
@@ -239,83 +269,112 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
               <FieldPreview field={field} />
             </Box>
 
-            {/* Label */}
-            <Field.Root
-              name="label"
-              required
-              hint={formatMessage({
-                id: getTranslation('fieldEditor.label.hint'),
-                defaultMessage: 'The label shown above the field',
-              })}
-            >
-              <Field.Label>
-                {formatMessage({
-                  id: getTranslation('fieldEditor.label.label'),
-                  defaultMessage: 'Label',
-                })}
-              </Field.Label>
-              <TextInput
-                value={field.label}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  handleLabelChange(e.target.value)
+            {/* Label — for input fields this is the label shown above the field.
+                For a heading the Label IS the heading text; a paragraph uses it as
+                a fallback when no Content is set. A divider is purely decorative
+                and has no configurable text, so the Label is hidden for it. */}
+            {field.type !== 'divider' && (
+              <Field.Root
+                name="label"
+                required
+                hint={
+                  field.type === 'heading'
+                    ? formatMessage({
+                        id: getTranslation('fieldEditor.label.hint.heading'),
+                        defaultMessage: 'The text shown for this heading',
+                      })
+                    : field.type === 'paragraph'
+                      ? formatMessage({
+                          id: getTranslation('fieldEditor.label.hint.paragraph'),
+                          defaultMessage: 'A short label; the paragraph text is set in Content below',
+                        })
+                      : formatMessage({
+                          id: getTranslation('fieldEditor.label.hint'),
+                          defaultMessage: 'The label shown above the field',
+                        })
                 }
-                placeholder={formatMessage({
-                  id: getTranslation('fieldEditor.label.placeholder'),
-                  defaultMessage: 'Field label',
-                })}
-              />
-              <Field.Hint />
-            </Field.Root>
+              >
+                <Field.Label>
+                  {field.type === 'heading'
+                    ? formatMessage({
+                        id: getTranslation('fieldEditor.label.label.heading'),
+                        defaultMessage: 'Heading Text',
+                      })
+                    : formatMessage({
+                        id: getTranslation('fieldEditor.label.label'),
+                        defaultMessage: 'Label',
+                      })}
+                </Field.Label>
+                <TextInput
+                  value={field.label}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleLabelChange(e.target.value)
+                  }
+                  placeholder={formatMessage({
+                    id: getTranslation('fieldEditor.label.placeholder'),
+                    defaultMessage: 'Field label',
+                  })}
+                />
+                <Field.Hint />
+              </Field.Root>
+            )}
 
-            {/* Name (field key) */}
-            <Field.Root
-              name="name"
-              required
-              hint={formatMessage({
-                id: getTranslation('fieldEditor.name.hint'),
-                defaultMessage: 'Used as the key in submission data',
-              })}
-            >
-              <Field.Label>
-                {formatMessage({
-                  id: getTranslation('fieldEditor.name.label'),
-                  defaultMessage: 'Name',
+            {/* Name (field key) — layout fields (heading/paragraph/divider) are
+                presentational and never submit data, so they have no field key. */}
+            {!isLayoutField && (
+              <Field.Root
+                name="name"
+                required
+                hint={formatMessage({
+                  id: getTranslation('fieldEditor.name.hint'),
+                  defaultMessage: 'Used as the key in submission data',
                 })}
-              </Field.Label>
-              <TextInput
-                value={field.name}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  handleNameChange(e.target.value)
-                }
-                placeholder={formatMessage({
-                  id: getTranslation('fieldEditor.name.placeholder'),
-                  defaultMessage: 'field_name',
-                })}
-              />
-              <Field.Hint />
-            </Field.Root>
+              >
+                <Field.Label>
+                  {formatMessage({
+                    id: getTranslation('fieldEditor.name.label'),
+                    defaultMessage: 'Name',
+                  })}
+                </Field.Label>
+                <TextInput
+                  value={field.name}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    handleNameChange(e.target.value)
+                  }
+                  placeholder={formatMessage({
+                    id: getTranslation('fieldEditor.name.placeholder'),
+                    defaultMessage: 'field_name',
+                  })}
+                />
+                <Field.Hint />
+              </Field.Root>
+            )}
 
             {/* Input-specific options for non-layout fields */}
             {!isLayoutField && (
               <>
-                <Field.Root name="placeholder">
-                  <Field.Label>
-                    {formatMessage({
-                      id: getTranslation('fieldEditor.placeholder.label'),
-                      defaultMessage: 'Placeholder',
-                    })}
-                  </Field.Label>
-                  <TextInput
-                    value={field.placeholder || ''}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      onChange({ placeholder: e.target.value })
-                    }
-                    placeholder={formatMessage({
-                      id: getTranslation('fieldEditor.placeholder.placeholder'),
-                      defaultMessage: 'Placeholder text',
-                    })}
-                  />
-                </Field.Root>
+                {/* Placeholder is free-text guidance shown inside a single input;
+                    it is meaningless for choice fields (select/radio/checkbox). */}
+                {!hasOptions && (
+                  <Field.Root name="placeholder">
+                    <Field.Label>
+                      {formatMessage({
+                        id: getTranslation('fieldEditor.placeholder.label'),
+                        defaultMessage: 'Placeholder',
+                      })}
+                    </Field.Label>
+                    <TextInput
+                      value={field.placeholder || ''}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        onChange({ placeholder: e.target.value })
+                      }
+                      placeholder={formatMessage({
+                        id: getTranslation('fieldEditor.placeholder.placeholder'),
+                        defaultMessage: 'Placeholder text',
+                      })}
+                    />
+                  </Field.Root>
+                )}
 
                 <Field.Root name="description">
                   <Field.Label>
