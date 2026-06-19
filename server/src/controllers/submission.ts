@@ -200,9 +200,12 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Delete multiple submissions for a form
-   * DELETE /strapi-forms/forms/:formId/submissions
+   * POST /strapi-forms/forms/:formId/submissions/bulk-delete
    *
    * Body: { ids: string[] }
+   *
+   * Uses POST rather than DELETE because Koa/Strapi does not parse a request
+   * body on DELETE requests, so the { ids } payload would be undefined here.
    */
   async deleteMany(ctx: SubmissionContext) {
     const { formId } = ctx.params;
