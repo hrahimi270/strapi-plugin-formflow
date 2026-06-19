@@ -13,8 +13,10 @@ import {
   TextInput,
   SingleSelect,
   SingleSelectOption,
+  Dialog,
 } from '@strapi/design-system';
-import { Plus, Trash, Pencil, Drag, Duplicate } from '@strapi/icons';
+import { ConfirmDialog } from '@strapi/strapi/admin';
+import { Plus, Trash, Pencil, Drag, Duplicate, WarningCircle } from '@strapi/icons';
 import { useIntl } from 'react-intl';
 import { v4 as uuidv4 } from 'uuid';
 import styled from 'styled-components';
@@ -153,6 +155,8 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // Field id queued for deletion; non-null while the confirm dialog is open.
+  const [fieldPendingDeletion, setFieldPendingDeletion] = useState<string | null>(null);
 
   const isMultiStep = settings.layout === 'multi-step';
   const steps = useMemo<FormStep[]>(() => settings.steps || [], [settings.steps]);
@@ -228,29 +232,42 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
     [fields, onChange]
   );
 
-  const handleFieldDelete = useCallback(
-    (fieldId: string) => {
-      const target = fields.find((f) => f.id === fieldId);
-      onChange(
-        fields.filter((f) => f.id !== fieldId).map((f, index) => ({ ...f, order: index }))
-      );
-      // Also unassign the field from any multi-step step. Step membership is
-      // keyed by the stable field id (not the mutable name).
-      if (target && steps.length > 0) {
-        onSettingsChange({
-          ...settings,
-          steps: steps.map((s) => ({
-            ...s,
-            fields: s.fields.filter((id) => id !== target.id),
-          })),
-        });
-      }
-      if (selectedFieldId === fieldId) {
-        setSelectedFieldId(null);
-        setIsEditorOpen(false);
-      }
-    },
-    [fields, onChange, selectedFieldId, steps, settings, onSettingsChange]
+  // Queue a field for deletion (opens the confirm dialog). Deleting a fully
+  // configured field is destructive and irreversible, so we confirm first.
+  const handleFieldDeleteRequest = useCallback((fieldId: string) => {
+    setFieldPendingDeletion(fieldId);
+  }, []);
+
+  const handleFieldDeleteCancel = useCallback(() => {
+    setFieldPendingDeletion(null);
+  }, []);
+
+  const handleFieldDeleteConfirm = useCallback(() => {
+    const fieldId = fieldPendingDeletion;
+    if (!fieldId) return;
+    const target = fields.find((f) => f.id === fieldId);
+    onChange(fields.filter((f) => f.id !== fieldId).map((f, index) => ({ ...f, order: index })));
+    // Also unassign the field from any multi-step step. Step membership is
+    // keyed by the stable field id (not the mutable name).
+    if (target && steps.length > 0) {
+      onSettingsChange({
+        ...settings,
+        steps: steps.map((s) => ({
+          ...s,
+          fields: s.fields.filter((id) => id !== target.id),
+        })),
+      });
+    }
+    if (selectedFieldId === fieldId) {
+      setSelectedFieldId(null);
+      setIsEditorOpen(false);
+    }
+    setFieldPendingDeletion(null);
+  }, [fieldPendingDeletion, fields, onChange, selectedFieldId, steps, settings, onSettingsChange]);
+
+  const fieldToDelete = useMemo(
+    () => fields.find((f) => f.id === fieldPendingDeletion) || null,
+    [fields, fieldPendingDeletion]
   );
 
   const handleEditorClose = useCallback(() => {
@@ -572,7 +589,7 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
                           withTooltip={false}
                           onClick={(e: React.MouseEvent) => {
                             e.stopPropagation();
-                            handleFieldDelete(field.id);
+                            handleFieldDeleteRequest(field.id);
                           }}
                         >
                           <Trash />
@@ -652,6 +669,36 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
         onChange={handleFieldUpdate}
         onClose={handleEditorClose}
       />
+
+      {/* Delete-field confirmation */}
+      <Dialog.Root
+        open={fieldPendingDeletion !== null}
+        onOpenChange={(open: boolean) => {
+          if (!open) {
+            handleFieldDeleteCancel();
+          }
+        }}
+      >
+        <ConfirmDialog
+          variant="danger-light"
+          icon={<WarningCircle />}
+          title={formatMessage({
+            id: getTranslation('builder.field.delete.confirm.title'),
+            defaultMessage: 'Delete field',
+          })}
+          onConfirm={handleFieldDeleteConfirm}
+          onCancel={handleFieldDeleteCancel}
+        >
+          {formatMessage(
+            {
+              id: getTranslation('builder.field.delete.confirm.body'),
+              defaultMessage:
+                'Are you sure you want to delete the field "{label}"? This will remove its configuration and cannot be undone.',
+            },
+            { label: fieldToDelete?.label || fieldToDelete?.name || '' }
+          )}
+        </ConfirmDialog>
+      </Dialog.Root>
     </>
   );
 };
