@@ -437,7 +437,7 @@ export default {
 };
 ```
 
-#### Content API Routes (`/api/forms/`)
+#### Content API Routes (`/api/strapi-forms/forms/`)
 
 ```typescript
 // server/src/routes/content-api/index.ts
@@ -1701,7 +1701,7 @@ export const FormEditPage = () => {
                         onChange={(e) => updateField('slug', e.target.value)}
                         placeholder="contact-form"
                       />
-                      <Field.Hint>Used in API endpoint: /api/forms/{formData.slug || 'slug'}</Field.Hint>
+                      <Field.Hint>Used in API endpoint: /api/strapi-forms/forms/{formData.slug || 'slug'}</Field.Hint>
                     </Field.Root>
                   </Grid.Item>
                   <Grid.Item col={12}>
@@ -1975,7 +1975,7 @@ export const FormBuilder: React.FC<FormBuilderProps> = ({ fields, onChange }) =>
 #### Get Form Schema
 
 ```
-GET /api/forms/:slug
+GET /api/strapi-forms/forms/:slug
 ```
 
 **Response:**
@@ -2055,7 +2055,7 @@ GET /api/forms/:slug
 #### Submit Form
 
 ```
-POST /api/forms/:slug/submit
+POST /api/strapi-forms/forms/:slug/submit
 Content-Type: application/json
 ```
 
@@ -2366,7 +2366,7 @@ const DynamicForm = ({ formSlug }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/forms/${formSlug}`)
+    fetch(`/api/strapi-forms/forms/${formSlug}`)
       .then(res => res.json())
       .then(data => {
         setSchema(data.data);
@@ -2387,7 +2387,7 @@ const DynamicForm = ({ formSlug }) => {
     setErrors({});
 
     try {
-      const response = await fetch(`/api/forms/${formSlug}/submit`, {
+      const response = await fetch(`/api/strapi-forms/forms/${formSlug}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(values)
