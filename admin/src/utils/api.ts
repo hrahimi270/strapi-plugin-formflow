@@ -270,6 +270,14 @@ export interface EmailNotification {
   subject: string;
   replyTo?: string;
   includeData?: boolean;
+  /**
+   * Optional custom email-body template. When non-empty, the server renders this
+   * string (substituting `{{...}}` placeholders) as the email body instead of the
+   * auto-generated layout. Supported placeholders: `{{form.title}}`, `{{form.slug}}`,
+   * `{{submission.id}}`, `{{submission.createdAt}}`, `{{data.fieldName}}`, and a
+   * `{{data}}` block that expands to all submitted fields. When empty/omitted the
+   * default auto-generated body is used.
+   */
   template?: string;
 }
 

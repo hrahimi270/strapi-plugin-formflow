@@ -6,6 +6,7 @@ import {
   Button,
   Field,
   TextInput,
+  Textarea,
   Checkbox,
   IconButton,
   Divider,
@@ -424,6 +425,40 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                     </Field.Root>
                   </Box>
                 </Flex>
+
+                <Divider />
+
+                {/* Custom email body template (optional) */}
+                <Box>
+                  <Field.Root
+                    name={`notification-${notifId}-template`}
+                    hint={formatMessage({
+                      id: getTranslation('notifications.email.template.hint'),
+                      defaultMessage:
+                        'Optional. Custom email body with {{form.title}}, {{form.slug}}, {{submission.id}}, {{submission.createdAt}}, {{data.fieldName}} for a single field, and {{data}} for all fields. Leave empty to use the default formatted email. HTML is allowed; submitted values are escaped automatically.',
+                    })}
+                  >
+                    <Field.Label>
+                      {formatMessage({
+                        id: getTranslation('notifications.email.template.label'),
+                        defaultMessage: 'Email template',
+                      })}
+                    </Field.Label>
+                    <Textarea
+                      rows={6}
+                      value={notification.template || ''}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        updateNotification(index, 'template', e.target.value || undefined)
+                      }
+                      placeholder={formatMessage({
+                        id: getTranslation('notifications.email.template.placeholder'),
+                        defaultMessage:
+                          'New submission for {{form.title}}\n\n{{data}}',
+                      })}
+                    />
+                    <Field.Hint />
+                  </Field.Root>
+                </Box>
 
                 <Divider />
 

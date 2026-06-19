@@ -85,10 +85,23 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     try {
-      // Build email content
+      // Build email content. When a non-empty custom template is configured, render
+      // it (substituting {{...}} placeholders) instead of the auto-generated body.
+      // Otherwise fall back to the default layout. `template` is trimmed so a
+      // whitespace-only value is treated as empty (uses the default body).
+      const customTemplate = config.template?.trim();
       const includeData = config.includeData !== false; // Default to true
-      const htmlContent = this.buildEmailHtml(form, submission, data, includeData);
-      const textContent = this.buildEmailText(form, submission, data, includeData);
+
+      let htmlContent: string;
+      let textContent: string;
+
+      if (customTemplate) {
+        htmlContent = this.renderTemplateHtml(customTemplate, form, submission, data);
+        textContent = this.renderTemplateText(customTemplate, form, submission, data);
+      } else {
+        htmlContent = this.buildEmailHtml(form, submission, data, includeData);
+        textContent = this.buildEmailText(form, submission, data, includeData);
+      }
 
       // Process subject with template variables
       const defaultSubject = `New submission from {{form.title}}`;
@@ -451,26 +464,132 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Replace template variables in a string
-   * Supports: {{form.title}}, {{form.slug}}, {{submission.id}}, {{submission.date}}, {{field.fieldName}}
+   * Replace template variables in a string.
+   *
+   * Supported placeholders:
+   *   {{form.title}}, {{form.slug}}
+   *   {{submission.id}}, {{submission.createdAt}}, {{submission.date}} (alias)
+   *   {{data.fieldName}}  - a single submitted field value
+   *   {{field.fieldName}} - legacy alias of {{data.fieldName}}, kept for back-compat
+   *   {{data}}            - a block listing every submitted field as "Label: value"
+   *
+   * Unknown variables resolve to the empty string.
+   *
+   * The optional `escape` callback is the single escape boundary for interpolated
+   * values: pass {@link escapeHtml} when rendering the HTML body so every value is
+   * escaped exactly once, and omit it (identity) for the subject and the plain-text
+   * body so they are NEVER HTML-escaped. The template's own literal text is left
+   * untouched either way — only interpolated user/submission values pass through
+   * `escape`, so there is no double-escaping.
    */
   replaceTemplateVariables(
     template: string,
     form: EmailFormContext,
     submission: EmailSubmissionContext,
+    data: Record<string, unknown>,
+    escape: (text: string) => string = (text) => text
+  ): string {
+    const fieldValue = (fieldName: string): string => {
+      const value = data[fieldName];
+      if (value === null || value === undefined) return '';
+      if (Array.isArray(value)) return escape(value.join(', '));
+      if (typeof value === 'object') return escape(JSON.stringify(value));
+      return escape(String(value));
+    };
+
+    return template
+      .replace(/\{\{form\.title\}\}/g, escape(form.title))
+      .replace(/\{\{form\.slug\}\}/g, escape(form.slug))
+      .replace(/\{\{submission\.id\}\}/g, escape(submission.documentId))
+      .replace(/\{\{submission\.createdAt\}\}/g, escape(this.formatDate(submission.createdAt, false)))
+      .replace(/\{\{submission\.date\}\}/g, escape(this.formatDate(submission.createdAt, false)))
+      .replace(/\{\{data\}\}/g, () => this.buildDataBlock(form, submission, data, escape))
+      .replace(/\{\{(?:data|field)\.(\w+)\}\}/g, (_, fieldName) => fieldValue(fieldName));
+  },
+
+  /**
+   * Build the `{{data}}` block: every submitted field rendered as "Label: value",
+   * one per line, in the form's field order with unknown fields appended. Layout
+   * and honeypot fields are skipped (mirroring the auto-generated body).
+   *
+   * Interpolated labels and values pass through `escape` exactly once, so this is
+   * safe in both the HTML body (escape = escapeHtml) and the plain-text body
+   * (escape = identity). The newline separator is left raw; HTML callers can wrap
+   * the result in <pre>/<br> as appropriate at the template level.
+   */
+  buildDataBlock(
+    form: EmailFormContext,
+    submission: EmailSubmissionContext,
+    data: Record<string, unknown>,
+    escape: (text: string) => string
+  ): string {
+    const fields = form.fields || [];
+    const fieldOrder = fields.map((f) => f.name);
+
+    const sortedEntries = Object.entries(data).sort(([a], [b]) => {
+      const indexA = fieldOrder.indexOf(a);
+      const indexB = fieldOrder.indexOf(b);
+      if (indexA === -1 && indexB === -1) return 0;
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+
+    const lines: string[] = [];
+    for (const [key, value] of sortedEntries) {
+      const field = fields.find((f) => f.name === key);
+
+      if (field && LAYOUT_FIELD_TYPES.includes(field.type)) {
+        continue;
+      }
+      if (key.toLowerCase().includes('honeypot') || key.startsWith('_hp')) {
+        continue;
+      }
+
+      const label = field?.label || key;
+      const displayValue = this.formatValueForText(value);
+      lines.push(`${escape(label)}: ${escape(displayValue)}`);
+    }
+
+    return lines.join('\n');
+  },
+
+  /**
+   * Render a custom email-body template into HTML.
+   *
+   * Interpolated user/submission values are HTML-escaped exactly once (via
+   * {@link escapeHtml}) — this is the HTML escape boundary. The template's own
+   * literal markup is preserved verbatim, so authors can include HTML. Newlines
+   * in the rendered output are converted to <br> for readability.
+   */
+  renderTemplateHtml(
+    template: string,
+    form: EmailFormContext,
+    submission: EmailSubmissionContext,
     data: Record<string, unknown>
   ): string {
-    return template
-      .replace(/\{\{form\.title\}\}/g, form.title)
-      .replace(/\{\{form\.slug\}\}/g, form.slug)
-      .replace(/\{\{submission\.id\}\}/g, submission.documentId)
-      .replace(/\{\{submission\.date\}\}/g, this.formatDate(submission.createdAt, false))
-      .replace(/\{\{field\.(\w+)\}\}/g, (_, fieldName) => {
-        const value = data[fieldName];
-        if (value === null || value === undefined) return '';
-        if (Array.isArray(value)) return value.join(', ');
-        return String(value);
-      });
+    const rendered = this.replaceTemplateVariables(
+      template,
+      form,
+      submission,
+      data,
+      (text) => this.escapeHtml(text)
+    );
+    return rendered.replace(/\n/g, '<br>\n');
+  },
+
+  /**
+   * Render a custom email-body template into plain text.
+   *
+   * The plain-text variant is NEVER HTML-escaped — values are interpolated as-is.
+   */
+  renderTemplateText(
+    template: string,
+    form: EmailFormContext,
+    submission: EmailSubmissionContext,
+    data: Record<string, unknown>
+  ): string {
+    return this.replaceTemplateVariables(template, form, submission, data);
   },
 
   /**
