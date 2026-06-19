@@ -85,6 +85,42 @@ const getFieldType = (fieldName: string, fields?: FormField[]): string | undefin
   return fields?.find((f) => f.name === fieldName)?.type;
 };
 
+/**
+ * Field types whose stored values are option *values* that should be displayed
+ * as their human-readable option *labels* (select / radio / multi-select
+ * checkboxes).
+ */
+const CHOICE_FIELD_TYPES = new Set(['select', 'radio', 'checkbox']);
+
+/**
+ * Map a single stored option value to its display label using the field's
+ * configured options. Falls back to the raw value when no option matches
+ * (e.g. an option removed from the form after the submission was made).
+ */
+const getOptionLabel = (value: unknown, field?: FormField): string => {
+  const raw = String(value);
+  const match = field?.options?.find((o) => o.value === raw);
+  return match?.label ?? raw;
+};
+
+/**
+ * Resolve a choice field's stored value(s) to option label(s). Returns
+ * undefined when the field is not a choice field (so the caller can fall back to
+ * its default rendering).
+ */
+const getChoiceLabels = (
+  fieldName: string,
+  value: unknown,
+  fields?: FormField[]
+): string[] | undefined => {
+  const field = fields?.find((f) => f.name === fieldName);
+  if (!field || !CHOICE_FIELD_TYPES.has(field.type)) {
+    return undefined;
+  }
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((v) => getOptionLabel(v, field));
+};
+
 interface MetadataItemProps {
   label: string;
   children: React.ReactNode;
@@ -209,6 +245,18 @@ export const SubmissionDetailPage = () => {
 
     if (value === null || value === undefined || value === '') {
       return <Typography textColor="neutral400">—</Typography>;
+    }
+
+    // For choice fields (select/radio/checkbox) the stored value(s) are option
+    // *values* (e.g. "option_1"); display the matching option *label(s)*
+    // ("Option 1"), falling back to the raw value when no option matches.
+    const choiceLabels = getChoiceLabels(key, value, submission.form?.fields);
+    if (choiceLabels) {
+      return (
+        <Typography textColor="neutral800">
+          {choiceLabels.length === 0 ? '—' : choiceLabels.join(', ')}
+        </Typography>
+      );
     }
 
     if (Array.isArray(value)) {
