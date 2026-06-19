@@ -1,5 +1,5 @@
 import type * as React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useIntl } from 'react-intl';
 import {
@@ -40,7 +40,7 @@ import { useForm } from '../hooks/useForm';
 import { PLUGIN_ID } from '../pluginId';
 import { getTranslation } from '../utils/getTranslation';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { SubmissionStatus, ExportFormat } from '../utils/api';
+import { SubmissionStatus, ExportFormat, FormField } from '../utils/api';
 
 /**
  * Status options for the filter dropdown.
@@ -54,6 +54,13 @@ const STATUS_OPTIONS: Array<{ value: SubmissionStatus; labelId: string; defaultL
 ];
 
 const DEFAULT_PAGE_SIZE = 25;
+
+/**
+ * Sentinel value for the explicit "All" option in the status filter. Selecting
+ * it clears the status filter (SingleSelectOption cannot use an empty `value`,
+ * which the component reserves for its unselected/placeholder state).
+ */
+const ALL_STATUS_VALUE = 'all';
 
 /**
  * Format a date string for display.
@@ -74,8 +81,14 @@ const formatDate = (dateStr: string): string => {
 
 /**
  * Get a short preview of submission data (first 2 non-empty fields).
+ *
+ * Each data key is the field `name`; resolve it to the field's human-readable
+ * `label` via the form's field definitions, falling back to the raw key when no
+ * matching field is found (e.g. legacy data or a field removed from the form).
  */
-const getPreview = (data: Record<string, unknown>): string => {
+const getPreview = (data: Record<string, unknown>, fields?: FormField[]): string => {
+  const labelByName = new Map((fields ?? []).map((f) => [f.name, f.label]));
+
   const entries = Object.entries(data)
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
     .slice(0, 2);
@@ -86,9 +99,10 @@ const getPreview = (data: Record<string, unknown>): string => {
 
   return entries
     .map(([key, value]) => {
+      const label = labelByName.get(key) || key;
       const strValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
       const truncated = strValue.length > 30 ? `${strValue.slice(0, 30)}...` : strValue;
-      return `${key}: ${truncated}`;
+      return `${label}: ${truncated}`;
     })
     .join(' | ');
 };
@@ -169,7 +183,17 @@ const SubmissionsView = ({
   } = useSubmissions(formId, { page, pageSize, status });
 
   // Page changes flow through the URL; push them into the hook (no remount).
+  // The hook already fetches the initial `page` from `initialQueryParams` on
+  // mount, so skip the first run of this effect — otherwise it would call
+  // `setPage(page)` with the same value, mutate the hook's query state, and
+  // fire a redundant second fetch on every list load (and remount). Only
+  // subsequent `page` changes (pagination clicks / URL edits) push through.
+  const didMountRef = useRef(false);
   useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
     setPage(page);
   }, [page, setPage]);
 
@@ -334,7 +358,9 @@ const SubmissionsView = ({
 
   const handleStatusFilterChange = (value: string | number) => {
     setSelectedIds([]);
-    if (value) {
+    // `ALL_STATUS_VALUE` is the explicit "All" option (and the empty value used
+    // by the SingleSelect's clear button); both clear the status filter.
+    if (value && value !== ALL_STATUS_VALUE) {
       setQuery({ status: value as SubmissionStatus, page: '1' });
     } else {
       setQuery({ status: undefined, page: '1' });
@@ -484,6 +510,12 @@ const SubmissionsView = ({
                   defaultMessage: 'Clear filter',
                 })}
               >
+                <SingleSelectOption value={ALL_STATUS_VALUE}>
+                  {formatMessage({
+                    id: getTranslation('submissions.filter.all'),
+                    defaultMessage: 'All',
+                  })}
+                </SingleSelectOption>
                 {STATUS_OPTIONS.map((option) => (
                   <SingleSelectOption key={option.value} value={option.value}>
                     {formatMessage({ id: option.labelId, defaultMessage: option.defaultLabel })}
@@ -524,7 +556,14 @@ const SubmissionsView = ({
       <Layouts.Content>
         {numberOfSubmissions > 0 ? (
           <>
-            <Table colCount={5} rowCount={numberOfSubmissions + 1}>
+            <Table
+              colCount={5}
+              rowCount={numberOfSubmissions + 1}
+              aria-label={formatMessage({
+                id: getTranslation('submissions.title'),
+                defaultMessage: 'Submissions',
+              })}
+            >
               <Thead>
                 <Tr>
                   <Th>
@@ -598,7 +637,7 @@ const SubmissionsView = ({
                     </Td>
                     <Td>
                       <Typography textColor="neutral600" ellipsis>
-                        {getPreview(submission.data)}
+                        {getPreview(submission.data, form?.fields)}
                       </Typography>
                     </Td>
                     <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
