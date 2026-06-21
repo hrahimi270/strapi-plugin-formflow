@@ -52,15 +52,18 @@ const isFormActivePolicy = async (
   }
 
   try {
-    // Fetch form by slug using the form service
+    // Fetch the PUBLISHED form by slug. findBySlug requests status:'published',
+    // so a missing record here means there is no published version (draft-only).
     const form = (await strapi
       .plugin('strapi-forms')
       .service('form')
       .findBySlug(slug)) as FormRecord | null;
 
-    // Form not found
+    // Form not found (no published version exists)
     if (!form) {
-      strapi.log.debug(`[Strapi Forms] is-form-active policy: Form not found: ${slug}`);
+      strapi.log.debug(
+        `[Strapi Forms] is-form-active policy: No published form found: ${slug}`
+      );
       return false;
     }
 
@@ -70,8 +73,8 @@ const isFormActivePolicy = async (
       return false;
     }
 
-    // Form is not published (draft/publish workflow)
-    // Note: publishedAt being null means the form is in draft state
+    // Defensive: published records carry a non-null publishedAt. If for any
+    // reason it is null, treat the form as unavailable.
     if (form.publishedAt === null) {
       strapi.log.debug(`[Strapi Forms] is-form-active policy: Form is not published: ${slug}`);
       return false;

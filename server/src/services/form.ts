@@ -40,6 +40,37 @@ export interface FormField {
 }
 
 /**
+ * Multi-step form step definition
+ */
+export interface FormStep {
+  id: string;
+  title: string;
+  description?: string;
+  fields: string[];
+}
+
+/**
+ * reCAPTCHA configuration. The secretKey is server-only and MUST NEVER be
+ * exposed through the public schema.
+ */
+export interface RecaptchaConfig {
+  enabled: boolean;
+  siteKey: string;
+  secretKey: string;
+  version: 'v2' | 'v3';
+  threshold?: number;
+}
+
+/**
+ * Spam protection configuration
+ */
+export interface SpamProtectionConfig {
+  honeypot: boolean;
+  honeypotFieldName: string;
+  recaptcha?: RecaptchaConfig;
+}
+
+/**
  * Default form settings structure
  */
 export interface FormSettings {
@@ -47,6 +78,7 @@ export interface FormSettings {
   showResetButton: boolean;
   resetButtonText: string;
   layout: 'single' | 'multi-step';
+  steps?: FormStep[];
   emailNotifications: Array<{
     enabled: boolean;
     to: string[];
@@ -61,10 +93,14 @@ export interface FormSettings {
     headers?: Record<string, string>;
     events: Array<'submission.created' | 'submission.updated'>;
   }>;
-  spam: {
-    honeypot: boolean;
-    honeypotFieldName: string;
-  };
+  spam: SpamProtectionConfig;
+  /**
+   * Optional raw CSS the consuming frontend may inject when rendering the form
+   * (e.g. into a <style> tag). Exposed verbatim through the public schema; the
+   * server never interprets it. Empty by default so existing forms are
+   * unaffected.
+   */
+  customCss?: string;
 }
 
 const CONTENT_TYPE_UID = 'plugin::strapi-forms.form';
@@ -91,10 +127,28 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Find a form by its slug (used for public API)
+   *
+   * Returns the PUBLISHED version of the form. With draftAndPublish enabled,
+   * the document service defaults to the draft version (publishedAt=null),
+   * which would make published+active forms appear unpublished to the public
+   * API. Passing status:'published' ensures the public-facing record is used.
    */
   async findBySlug(slug: string) {
     const forms = await strapi.documents(CONTENT_TYPE_UID).findMany({
       filters: { slug },
+      status: 'published',
+      limit: 1,
+    });
+    return forms[0] || null;
+  },
+
+  /**
+   * Find the DRAFT version of a form by its slug (admin-only lookup)
+   */
+  async findDraftBySlug(slug: string) {
+    const forms = await strapi.documents(CONTENT_TYPE_UID).findMany({
+      filters: { slug },
+      status: 'draft',
       limit: 1,
     });
     return forms[0] || null;
@@ -125,6 +179,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
       : [];
 
     return strapi.documents(CONTENT_TYPE_UID).create({
+      status: 'published',
       data: {
         ...data,
         fields: processedFields,
@@ -165,6 +220,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     return strapi.documents(CONTENT_TYPE_UID).update({
       documentId,
+      status: 'published',
       data: processedData,
     });
   },
@@ -194,7 +250,42 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Duplicate an existing form with a new title and slug
+   * Generate a slug for a duplicated form that is unique across existing forms.
+   *
+   * Derives a base of `${original}-copy` and, if that is already taken, appends
+   * an incrementing suffix (`-copy-2`, `-copy-3`, ...) until a free slug is
+   * found. A null/empty base falls back to `form-copy`.
+   */
+  async generateUniqueSlug(baseSlug: string) {
+    const base = `${baseSlug || 'form'}-copy`;
+
+    let candidate = base;
+    let suffix = 2;
+
+    // Check against the draft version: every document has a draft row, so this
+    // reliably detects any existing form using the candidate slug.
+    while (
+      (
+        await strapi.documents(CONTENT_TYPE_UID).findMany({
+          filters: { slug: candidate },
+          status: 'draft',
+          limit: 1,
+        })
+      ).length > 0
+    ) {
+      candidate = `${base}-${suffix}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  },
+
+  /**
+   * Duplicate an existing form with a new title and a unique slug.
+   *
+   * create() does not backfill a slug, so we must generate one here; otherwise
+   * the copy is saved with slug:null, which breaks the editor and 404s the
+   * public API.
    */
   async duplicate(documentId: string) {
     const original = await this.findOne(documentId);
@@ -204,7 +295,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     // Extract only the data fields we need, excluding system fields
-    const { title, description, fields, settings, successMessage, redirectUrl, isActive } =
+    const { title, slug, description, fields, settings, successMessage, redirectUrl, isActive } =
       original;
 
     // Generate new field IDs for the duplicated form to ensure uniqueness
@@ -215,8 +306,11 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         }))
       : [];
 
+    const newSlug = await this.generateUniqueSlug(slug as string);
+
     return this.create({
       title: `${title} (Copy)`,
+      slug: newSlug,
       description,
       fields: duplicatedFields,
       settings: settings as Partial<FormSettings>,
@@ -268,12 +362,27 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         showResetButton: settings.showResetButton || false,
         resetButtonText: settings.resetButtonText || 'Reset',
         layout: settings.layout || 'single',
-        spam: settings.spam
-          ? {
-              honeypot: settings.spam.honeypot || false,
-              honeypotFieldName: settings.spam.honeypotFieldName,
-            }
-          : { honeypot: false },
+        // Expose steps only for multi-step layouts so the frontend can render them
+        ...(settings.layout === 'multi-step' && settings.steps
+          ? { steps: settings.steps }
+          : {}),
+        // Expose custom CSS only when set so the consuming frontend can inject
+        // it (e.g. into a <style> tag). Omitted entirely when empty, keeping the
+        // response shape unchanged for existing forms.
+        ...(settings.customCss ? { customCss: settings.customCss } : {}),
+        spam: {
+          honeypot: settings.spam?.honeypot || false,
+          honeypotFieldName: settings.spam?.honeypotFieldName,
+          // Expose only public-safe reCAPTCHA fields (NEVER the secretKey)
+          ...(settings.spam?.recaptcha?.enabled
+            ? {
+                recaptcha: {
+                  siteKey: settings.spam.recaptcha.siteKey,
+                  version: settings.spam.recaptcha.version,
+                },
+              }
+            : {}),
+        },
       },
     };
   },
@@ -293,6 +402,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         honeypot: true,
         honeypotFieldName: '_gotcha',
       },
+      customCss: '',
     };
   },
 
@@ -373,19 +483,53 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Increment the submission count for a form
+   * Recompute and persist the submission count for a form.
+   *
+   * Rather than a racy read-modify-write on the draft, this derives the count
+   * from the authoritative number of related submissions so concurrent
+   * submissions cannot clobber each other.
+   *
+   * IMPORTANT: this must NOT call documents().update({ status: 'published' }).
+   * That writes the count to the draft and then publishes the WHOLE draft over
+   * the published version, force-publishing any in-progress unpublished admin
+   * edits to title/fields/settings on every public submit. Instead we:
+   *   1. Write the count to the DRAFT via a normal document service update
+   *      (no status change, so this stays draft-only and triggers no publish).
+   *   2. Patch ONLY the published row's `submissionCount` column directly via
+   *      the lower-level query engine, which does not run publish() and so
+   *      leaves the rest of the published record untouched.
+   * Both draft and published rows therefore stay in sync without leaking draft
+   * edits into the published, public-facing form.
    */
   async incrementSubmissionCount(documentId: string) {
-    const form = await this.findOne(documentId);
-    if (!form) {
-      throw new Error('Form not found');
+    const total = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).count({
+      filters: { form: { documentId } },
+    });
+
+    // 1. Write to the draft only (default target for the document service).
+    const updated = await strapi.documents(CONTENT_TYPE_UID).update({
+      documentId,
+      data: { submissionCount: total } as Record<string, unknown>,
+    });
+
+    // 2. Patch the published row's column directly (if a published version
+    // exists) WITHOUT triggering publish(), so the public schema reflects the
+    // same count without copying unpublished draft edits over the published
+    // record. updateMany is a no-op when no published row matches.
+    try {
+      await strapi.db.query(CONTENT_TYPE_UID).updateMany({
+        where: { documentId, publishedAt: { $notNull: true } },
+        data: { submissionCount: total },
+      });
+    } catch (error) {
+      strapi.log.warn(
+        `[Strapi Forms] Failed to sync published submissionCount for form ${documentId}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
     }
 
-    const currentCount = typeof form.submissionCount === 'number' ? form.submissionCount : 0;
-
-    return this.update(documentId, {
-      submissionCount: currentCount + 1,
-    });
+    return updated;
   },
 
   /**

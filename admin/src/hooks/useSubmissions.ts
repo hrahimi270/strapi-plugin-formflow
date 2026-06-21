@@ -2,44 +2,38 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useFetchClient } from '@strapi/strapi/admin';
 import {
   API,
+  rawRequest,
   FormSubmission,
   SubmissionUpdatePayload,
+  SubmissionStatus,
   ApiResponse,
+  PaginatedResponse,
+  PaginationMeta,
   SubmissionsQueryParams,
+  ExportFormat,
+  ExportOptions,
 } from '../utils/api';
-
-/**
- * Pagination metadata from API response
- */
-interface PaginationMeta {
-  page: number;
-  pageSize: number;
-  pageCount: number;
-  total: number;
-}
-
-/**
- * Paginated API response structure
- */
-interface PaginatedResponse<T> {
-  data: T;
-  meta: {
-    pagination: PaginationMeta;
-  };
-}
 
 /**
  * Filter state for submissions
  */
-interface SubmissionFilters {
-  status?: 'new' | 'read' | 'processed' | 'archived' | 'spam';
+export interface SubmissionFilters {
+  status?: SubmissionStatus;
 }
 
-interface UseSubmissionsReturn {
+/**
+ * Response payload from the batch delete endpoint
+ */
+export interface BulkDeleteResult {
+  deleted: number;
+}
+
+export interface UseSubmissionsReturn {
   submissions: FormSubmission[];
   pagination: PaginationMeta | null;
   isLoading: boolean;
   isDeleting: boolean;
+  isUpdating: boolean;
   isExporting: boolean;
   error: Error | null;
   filters: SubmissionFilters;
@@ -48,25 +42,31 @@ interface UseSubmissionsReturn {
   refetch: () => Promise<void>;
   updateSubmission: (documentId: string, data: SubmissionUpdatePayload) => Promise<FormSubmission>;
   deleteSubmission: (documentId: string) => Promise<void>;
-  bulkDelete: (documentIds: string[]) => Promise<{ deleted: number }>;
+  bulkDelete: (documentIds: string[]) => Promise<BulkDeleteResult>;
+  bulkUpdateStatus: (documentIds: string[], status: SubmissionStatus) => Promise<FormSubmission[]>;
   markAsRead: (documentId: string) => Promise<FormSubmission>;
   markAsArchived: (documentId: string) => Promise<FormSubmission>;
-  exportSubmissions: (format?: 'csv' | 'json', status?: string) => Promise<void>;
+  exportSubmissions: (
+    format?: ExportFormat,
+    status?: SubmissionStatus,
+    options?: { includeIp?: boolean }
+  ) => Promise<void>;
 }
 
 /**
- * Hook for managing form submissions with pagination, filtering, and export
- * Provides list, update, delete, and export operations
+ * Hook for managing form submissions with pagination, filtering, and export.
+ * Provides list, update, delete, bulk, and export operations.
  */
 export const useSubmissions = (
   formId: string,
   initialQueryParams?: SubmissionsQueryParams
 ): UseSubmissionsReturn => {
-  const { get, put, del } = useFetchClient();
+  const { get, post, put, del } = useFetchClient();
   const [submissions, setSubmissions] = useState<FormSubmission[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -151,16 +151,48 @@ export const useSubmissions = (
 
   const updateSubmission = useCallback(
     async (documentId: string, data: SubmissionUpdatePayload): Promise<FormSubmission> => {
-      const response = await put<ApiResponse<FormSubmission>>(API.submission(documentId), data);
-      const updated = response.data.data;
+      setIsUpdating(true);
+      try {
+        const response = await put<ApiResponse<FormSubmission>>(API.submission(documentId), data);
+        const updated = response.data.data;
 
-      // Update local state
-      setSubmissions((prev) => prev.map((sub) => (sub.documentId === documentId ? updated : sub)));
+        // Update local state
+        setSubmissions((prev) =>
+          prev.map((sub) => (sub.documentId === documentId ? updated : sub))
+        );
 
-      return updated;
+        return updated;
+      } finally {
+        setIsUpdating(false);
+      }
     },
     [put]
   );
+
+  /**
+   * Recompute pagination counts after `removed` rows are deleted.
+   *
+   * This deliberately does NOT touch the current page. The URL (owned by the
+   * page component) is the single source of truth for the page number, and it
+   * is responsible for stepping back when a non-first page is emptied — driving
+   * a refetch through `setPage`. Mutating `page` here as well caused a
+   * double-decrement.
+   *
+   * @param removed Number of rows that were deleted.
+   */
+  const reconcileAfterDelete = useCallback((removed: number) => {
+    setPagination((prev) => {
+      if (!prev) {
+        return null;
+      }
+      const total = Math.max(0, prev.total - removed);
+      return {
+        ...prev,
+        total,
+        pageCount: Math.max(1, Math.ceil(total / prev.pageSize)),
+      };
+    });
+  }, []);
 
   const deleteSubmission = useCallback(
     async (documentId: string): Promise<void> => {
@@ -168,60 +200,72 @@ export const useSubmissions = (
       try {
         await del(API.submission(documentId));
 
-        // Remove from local state
         setSubmissions((prev) => prev.filter((sub) => sub.documentId !== documentId));
-
-        // Update pagination total
-        setPagination((prev) =>
-          prev
-            ? {
-                ...prev,
-                total: prev.total - 1,
-                pageCount: Math.ceil((prev.total - 1) / prev.pageSize),
-              }
-            : null
-        );
+        reconcileAfterDelete(1);
       } finally {
         setIsDeleting(false);
       }
     },
-    [del]
+    [del, reconcileAfterDelete]
   );
 
   const bulkDelete = useCallback(
-    async (documentIds: string[]): Promise<{ deleted: number }> => {
+    async (documentIds: string[]): Promise<BulkDeleteResult> => {
       if (documentIds.length === 0) {
         return { deleted: 0 };
       }
 
       setIsDeleting(true);
       try {
-        // Delete each submission individually
-        // Using Promise.all for parallel deletion
-        await Promise.all(documentIds.map((id) => del(API.submission(id))));
-
-        const deletedCount = documentIds.length;
-
-        // Remove from local state
-        setSubmissions((prev) => prev.filter((sub) => !documentIds.includes(sub.documentId)));
-
-        // Update pagination
-        setPagination((prev) =>
-          prev
-            ? {
-                ...prev,
-                total: prev.total - deletedCount,
-                pageCount: Math.ceil((prev.total - deletedCount) / prev.pageSize),
-              }
-            : null
+        // Single batch request to the server's bulk-delete endpoint. This is a
+        // POST (not DELETE) because Koa does not parse a DELETE request body, so
+        // `{ ids }` must travel as a POST payload. Going through `useFetchClient`'s
+        // `post` also routes this through Strapi's auth/refresh lifecycle.
+        const response = await post<ApiResponse<{ success?: boolean; deleted?: number }>>(
+          API.bulkDeleteSubmissions(formId),
+          { ids: documentIds }
         );
+
+        const reported = response.data?.data?.deleted;
+        const deletedCount = typeof reported === 'number' ? reported : documentIds.length;
+
+        const idSet = new Set(documentIds);
+        setSubmissions((prev) => prev.filter((sub) => !idSet.has(sub.documentId)));
+        reconcileAfterDelete(deletedCount);
 
         return { deleted: deletedCount };
       } finally {
         setIsDeleting(false);
       }
     },
-    [del]
+    [post, formId, reconcileAfterDelete]
+  );
+
+  const bulkUpdateStatus = useCallback(
+    async (documentIds: string[], status: SubmissionStatus): Promise<FormSubmission[]> => {
+      if (documentIds.length === 0) {
+        return [];
+      }
+
+      setIsUpdating(true);
+      try {
+        // No batch status endpoint on the server; update per-item.
+        const updated = await Promise.all(
+          documentIds.map(async (id) => {
+            const response = await put<ApiResponse<FormSubmission>>(API.submission(id), { status });
+            return response.data.data;
+          })
+        );
+
+        const updatedById = new Map(updated.map((s) => [s.documentId, s]));
+        setSubmissions((prev) => prev.map((sub) => updatedById.get(sub.documentId) ?? sub));
+
+        return updated;
+      } finally {
+        setIsUpdating(false);
+      }
+    },
+    [put]
   );
 
   const markAsRead = useCallback(
@@ -239,11 +283,22 @@ export const useSubmissions = (
   );
 
   /**
-   * Export submissions as CSV or JSON
-   * Triggers a file download in the browser
+   * Export submissions as CSV or JSON. Triggers a file download in the browser.
+   *
+   * The export endpoint returns a raw text/csv (or JSON text) body. We must use
+   * `rawRequest` here rather than `useFetchClient`: the latter always calls
+   * `response.json()` and, for a `text/csv` body, swallows the resulting
+   * SyntaxError and returns `data: []` — discarding the export. It also exposes
+   * no `responseType`/`text` option (see {@link rawRequest}). The trade-off is
+   * that `rawRequest` does not share Strapi's 401-refresh lifecycle, so an
+   * expired token surfaces a clear "session expired, reload" error here.
    */
   const exportSubmissions = useCallback(
-    async (format: 'csv' | 'json' = 'csv', status?: string): Promise<void> => {
+    async (
+      format: ExportFormat = 'csv',
+      status?: SubmissionStatus,
+      options?: { includeIp?: boolean }
+    ): Promise<void> => {
       setIsExporting(true);
       try {
         const params = new URLSearchParams();
@@ -251,21 +306,41 @@ export const useSubmissions = (
         if (status) {
           params.append('status', status);
         }
+        if (options?.includeIp) {
+          params.append('includeIp', 'true');
+        }
 
-        // Use the get function to fetch the export data as text
-        const response = await get<string>(`${API.exportSubmissions(formId)}?${params.toString()}`);
+        const accept = format === 'csv' ? 'text/csv' : 'application/json';
 
-        // Create blob from the response data
-        const blob = new Blob([response.data], {
-          type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',
+        // `useFetchClient` always JSON-parses the response body, which would
+        // discard a `text/csv` export, so request the raw text via native fetch.
+        // `rawRequest` throws on a non-ok response (the server's message, or a
+        // clear "session expired" message on a 401 token-expiry).
+        const response = await rawRequest(
+          `${API.exportSubmissions(formId)}?${params.toString()}`,
+          {
+            method: 'GET',
+            accept,
+          }
+        );
+
+        const body = response.text;
+
+        const blob = new Blob([body], {
+          type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8',
         });
 
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
 
+        // Include the status (and form id) in the filename so exports of
+        // different status filters (e.g. "spam" vs "new") do not overwrite each
+        // other in the browser's downloads folder.
         const date = new Date().toISOString().split('T')[0];
-        link.download = `submissions-${date}.${format}`;
+        const statusPart = status ?? 'all';
+        const formPart = formId ? `${formId}-` : '';
+        link.download = `submissions-${formPart}${statusPart}-${date}.${format}`;
 
         document.body.appendChild(link);
         link.click();
@@ -275,7 +350,7 @@ export const useSubmissions = (
         setIsExporting(false);
       }
     },
-    [get, formId]
+    [formId]
   );
 
   return {
@@ -283,6 +358,7 @@ export const useSubmissions = (
     pagination,
     isLoading,
     isDeleting,
+    isUpdating,
     isExporting,
     error,
     filters,
@@ -292,8 +368,12 @@ export const useSubmissions = (
     updateSubmission,
     deleteSubmission,
     bulkDelete,
+    bulkUpdateStatus,
     markAsRead,
     markAsArchived,
     exportSubmissions,
   };
 };
+
+// Re-export so consumers can type export options if they construct them externally.
+export type { ExportOptions };

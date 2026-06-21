@@ -1,11 +1,112 @@
 import type { Core } from '@strapi/strapi';
 
-import type { ValidatableField } from './validation';
+import type { ValidatableField, UploadedFileMeta, UploadedFilesMap } from './validation';
+
+/**
+ * Re-export the multipart file types so the controller can type the files map it
+ * forwards into {@link submissionService.submit} without reaching into the
+ * validation service directly.
+ */
+export type { UploadedFileMeta, UploadedFilesMap };
+
+/**
+ * Media-library reference stored in submission.data for a `file` field.
+ * Mirrors the public-safe subset of a Strapi upload file record.
+ */
+export interface SubmissionFileRef {
+  /** Numeric media id. */
+  id: number;
+  /** Document id (Strapi v5); present on persisted upload records. */
+  documentId?: string;
+  /** Public URL of the uploaded file. */
+  url: string;
+  /** Stored file name. */
+  name: string;
+  /** Detected/declared MIME type. */
+  mime?: string;
+  /** File size in bytes. */
+  size?: number;
+}
 
 /**
  * Content type UID for form submissions
  */
 const SUBMISSION_CONTENT_TYPE_UID = 'plugin::strapi-forms.form-submission';
+
+/**
+ * Plugin config id used to read privacy options (anonymizeIp, dataRetentionDays).
+ */
+const PLUGIN_CONFIG_ID = 'plugin::strapi-forms';
+
+/**
+ * Mask an IP address for storage when IP anonymization is enabled.
+ *
+ * - IPv4 (e.g. `192.168.1.42`): the final octet is zeroed -> `192.168.1.0`.
+ * - IPv6 (e.g. `2001:db8:85a3::8a2e:370:7334`): truncated to the /64 prefix
+ *   (first four hextets), with the host bits zeroed -> `2001:db8:85a3:0::`.
+ *
+ * Anything that does not look like a recognizable IPv4/IPv6 address is returned
+ * unchanged (callers only invoke this when anonymization is enabled, and an
+ * unparseable value is better passed through than silently dropped).
+ *
+ * @param ip - Raw IP address string
+ * @returns The anonymized IP address string
+ */
+export const anonymizeIpAddress = (ip: string): string => {
+  if (!ip || typeof ip !== 'string') {
+    return ip;
+  }
+
+  // IPv4-mapped IPv6 (e.g. ::ffff:192.168.1.42): anonymize the embedded IPv4.
+  const mappedMatch = ip.match(/^(::ffff:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+  if (mappedMatch) {
+    return `${mappedMatch[1]}${anonymizeIpAddress(mappedMatch[2])}`;
+  }
+
+  // IPv4: zero the last octet.
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+    const octets = ip.split('.');
+    octets[3] = '0';
+    return octets.join('.');
+  }
+
+  // IPv6: keep the /64 prefix (first four hextets), zero the host portion.
+  if (ip.includes(':')) {
+    // Expand any `::` so we can reliably take the first four hextets.
+    const hasDoubleColon = ip.includes('::');
+    let hextets = ip.split(':');
+
+    if (hasDoubleColon) {
+      const [head, tail] = ip.split('::');
+      const headParts = head ? head.split(':') : [];
+      const tailParts = tail ? tail.split(':') : [];
+      const missing = 8 - headParts.length - tailParts.length;
+      if (missing < 0) {
+        // Malformed: leave untouched rather than corrupt it.
+        return ip;
+      }
+      hextets = [...headParts, ...Array(missing).fill('0'), ...tailParts];
+    }
+
+    if (hextets.length < 4) {
+      return ip;
+    }
+
+    const prefix = hextets.slice(0, 4).map((h) => h || '0');
+    // `prefix::` denotes the /64 network with all host bits zeroed.
+    return `${prefix.join(':')}::`;
+  }
+
+  return ip;
+};
+
+/**
+ * Request-body control field used to request validate-only, step-scoped
+ * validation for a multi-step form. Its value is a step id or a zero-based step
+ * index. It is a control field (never a real form field) and is always stripped
+ * from submission data before validation/storage, like the honeypot field.
+ */
+export const STEP_INDICATOR_FIELD = '_step';
 
 /**
  * Submission status values
@@ -45,7 +146,8 @@ export interface SubmissionQuery {
   filters?: Record<string, unknown>;
   sort?: Record<string, 'asc' | 'desc'> | string;
   limit?: number;
-  offset?: number;
+  // Document Service findMany uses offset-notation 'start' (not 'offset').
+  start?: number;
   populate?: string[];
 }
 
@@ -54,14 +156,6 @@ export interface SubmissionQuery {
  */
 export interface SubmissionResult {
   submission: FormSubmission;
-  successMessage?: string;
-  redirectUrl?: string;
-}
-
-/**
- * Spam submission result (silently rejected)
- */
-export interface SpamSubmissionResult {
   successMessage?: string;
   redirectUrl?: string;
 }
@@ -80,6 +174,28 @@ class ValidationError extends Error {
 }
 
 /**
+ * Multi-step form step definition. `fields` holds the stable field IDs that
+ * belong to the step (matching `FormField.id`), NOT field names.
+ */
+export interface FormStepDefinition {
+  id: string;
+  title?: string;
+  description?: string;
+  fields: string[];
+}
+
+/**
+ * Result of a validate-only step check. Reports validity and field-level errors
+ * for the requested step WITHOUT persisting any submission. `step` echoes the
+ * resolved step id (or the raw indicator when a step could not be resolved).
+ */
+export interface StepValidationResult {
+  valid: boolean;
+  errors: Record<string, string[]>;
+  step: string;
+}
+
+/**
  * Form structure for submission processing
  */
 export interface SubmittableForm {
@@ -89,6 +205,8 @@ export interface SubmittableForm {
   isActive: boolean;
   fields: ValidatableField[];
   settings?: {
+    layout?: 'single' | 'multi-step';
+    steps?: FormStepDefinition[];
     spam?: {
       honeypot?: boolean;
       honeypotFieldName?: string;
@@ -124,8 +242,10 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * Complete submission workflow: validate, sanitize, store, trigger hooks
    *
    * @param slug - Form slug identifier
-   * @param data - Raw submission data
+   * @param data - Raw submission data (non-file fields)
    * @param metadata - Client metadata (IP, user agent, etc.)
+   * @param files - Uploaded files keyed by field name (from multipart parser).
+   *   Optional so plain JSON submissions keep working unchanged.
    * @returns Submission result with success message/redirect
    * @throws ValidationError if validation fails
    * @throws Error if form not found or inactive
@@ -133,8 +253,9 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
   async submit(
     slug: string,
     data: Record<string, unknown>,
-    metadata: SubmissionMetadata
-  ): Promise<SubmissionResult | SpamSubmissionResult> {
+    metadata: SubmissionMetadata,
+    files: UploadedFilesMap = {}
+  ): Promise<SubmissionResult> {
     const formService = strapi.plugin('strapi-forms').service('form');
     const validationService = strapi.plugin('strapi-forms').service('validation');
 
@@ -152,33 +273,61 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     // Create a mutable copy of submission data
     const submissionData = { ...data };
 
-    // Check honeypot spam filter
+    // Strip the step-indicator control field. It is only meaningful for the
+    // validate-only step check (see validateStep) and must never be validated
+    // against form fields or persisted, even if a full submission includes it.
+    delete submissionData[STEP_INDICATOR_FIELD];
+
+    // Spam handling (honeypot + reCAPTCHA) lives in the spam-check middleware,
+    // which runs before this controller/service. Defensively strip the honeypot
+    // field here so it never reaches validation or storage.
     if (form.settings?.spam?.honeypot) {
       const honeypotFieldName = form.settings.spam.honeypotFieldName || '_gotcha';
-
-      if (validationService.isSpam(submissionData, honeypotFieldName)) {
-        // Log spam attempt but return success to avoid detection
-        strapi.log.info(`[Strapi Forms] Spam submission detected for form: ${slug}`);
-
-        return {
-          successMessage: form.successMessage || 'Thank you for your submission',
-          redirectUrl: form.redirectUrl,
-        };
-      }
-
-      // Remove honeypot field from data before processing
       delete submissionData[honeypotFieldName];
     }
 
-    // Validate submission data against form field definitions
-    const validationResult = validationService.validate(form.fields || [], submissionData);
+    const formFields = form.fields || [];
 
-    if (!validationResult.valid) {
-      throw new ValidationError(validationResult.errors);
+    // Validate non-file submission data against form field definitions.
+    const validationResult = validationService.validate(formFields, submissionData);
+
+    // Validate uploaded files (required/maxSize/allowedTypes) BEFORE persisting
+    // anything to the media library, so oversize/disallowed files never land.
+    const fileValidationResult = validationService.validateFiles(
+      formFields,
+      files,
+      submissionData
+    );
+
+    // Merge field-level errors from both passes and reject as one response.
+    const combinedErrors: Record<string, string[]> = {
+      ...validationResult.errors,
+      ...fileValidationResult.errors,
+    };
+
+    if (Object.keys(combinedErrors).length > 0) {
+      throw new ValidationError(combinedErrors);
     }
 
+    // Files passed validation: upload them to the media library and place the
+    // resulting media references into the submission data under each field name.
+    await this.processFileUploads(formFields, files, submissionData);
+
     // Sanitize data before storage
-    const sanitizedData = validationService.sanitize(form.fields || [], submissionData);
+    const sanitizedData = validationService.sanitize(formFields, submissionData);
+
+    // Optionally anonymize the submitter IP before it is persisted. When the
+    // plugin config `anonymizeIp` is false (the default) the raw IP is stored
+    // exactly as before. When enabled, the masked IP is stored in BOTH the
+    // top-level `ipAddress` column and `metadata.ipAddress` so no raw IP is
+    // retained anywhere.
+    const config = strapi.config.get(PLUGIN_CONFIG_ID, {}) as {
+      anonymizeIp?: boolean;
+    };
+    const storedIpAddress =
+      config?.anonymizeIp && metadata.ipAddress
+        ? anonymizeIpAddress(metadata.ipAddress)
+        : metadata.ipAddress;
 
     // Create submission record
     const submission = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).create({
@@ -187,10 +336,11 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
         data: sanitizedData,
         metadata: {
           ...metadata,
+          ipAddress: storedIpAddress,
           formVersion: form.updatedAt,
         },
         status: 'new' as SubmissionStatus,
-        ipAddress: metadata.ipAddress,
+        ipAddress: storedIpAddress,
         userAgent: metadata.userAgent,
       },
     })) as unknown as FormSubmission;
@@ -207,6 +357,197 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       submission,
       successMessage: form.successMessage || 'Thank you for your submission',
       redirectUrl: form.redirectUrl,
+    };
+  },
+
+  /**
+   * Validate a SINGLE step of a multi-step form WITHOUT persisting anything.
+   *
+   * This is the step-aware counterpart to {@link submit}: it powers per-step
+   * (wizard) validation so a frontend can confirm a step is valid before letting
+   * the user advance. It is VALIDATION-ONLY — no submission is ever created,
+   * no files are uploaded, no hooks fire, and the submission count is untouched.
+   * Persistence happens exclusively through a full {@link submit} call (one with
+   * no step indicator).
+   *
+   * Only the non-file fields whose ids/names belong to the requested step are
+   * checked, reusing the same per-field logic as a full submission (conditional
+   * visibility against the full data, required, rules, type, options). File
+   * fields are intentionally not validated here (uploads are deferred to the
+   * final submit). The returned errors use the identical
+   * `{ valid, errors }` shape as full validation (errors keyed by field name),
+   * with an added `step` echoing the resolved step id.
+   *
+   * @param slug - Form slug identifier
+   * @param data - Raw submission data accumulated so far (keyed by field name)
+   * @param stepIndicator - Step id or zero-based step index to validate
+   * @returns StepValidationResult (valid flag + field errors + resolved step)
+   * @throws Error if the form is not found, inactive, not multi-step, or the
+   *   step indicator cannot be resolved to a defined step
+   */
+  async validateStep(
+    slug: string,
+    data: Record<string, unknown>,
+    stepIndicator: string | number
+  ): Promise<StepValidationResult> {
+    const formService = strapi.plugin('strapi-forms').service('form');
+    const validationService = strapi.plugin('strapi-forms').service('validation');
+
+    const form = (await formService.findBySlug(slug)) as SubmittableForm | null;
+
+    if (!form) {
+      throw new Error('Form not found');
+    }
+
+    if (!form.isActive) {
+      throw new Error('Form is not accepting submissions');
+    }
+
+    const settings = form.settings;
+    const steps = settings?.steps;
+
+    // Step validation only applies to multi-step forms with defined steps.
+    if (settings?.layout !== 'multi-step' || !steps?.length) {
+      throw new Error('Form is not multi-step');
+    }
+
+    const step = this.resolveStep(steps, stepIndicator);
+
+    if (!step) {
+      throw new Error('Step not found');
+    }
+
+    // Work on a copy with control/spam fields stripped, mirroring submit().
+    const submissionData = { ...data };
+    delete submissionData[STEP_INDICATOR_FIELD];
+
+    if (settings?.spam?.honeypot) {
+      const honeypotFieldName = settings.spam.honeypotFieldName || '_gotcha';
+      delete submissionData[honeypotFieldName];
+    }
+
+    // Validate only the fields belonging to this step. Step membership is keyed
+    // by stable field id; validateSubset also matches by name defensively.
+    const validationResult = validationService.validateSubset(
+      form.fields || [],
+      step.fields || [],
+      submissionData
+    );
+
+    return {
+      valid: validationResult.valid,
+      errors: validationResult.errors,
+      step: step.id,
+    };
+  },
+
+  /**
+   * Resolve a step indicator (a step id, or a zero-based index passed as a
+   * number or numeric string) to its {@link FormStepDefinition}.
+   *
+   * Id matching takes precedence over index so a purely-numeric step id is not
+   * accidentally treated as an index. Returns null when no step matches.
+   *
+   * @param steps - The form's defined steps
+   * @param indicator - Step id or zero-based index
+   */
+  resolveStep(
+    steps: FormStepDefinition[],
+    indicator: string | number
+  ): FormStepDefinition | null {
+    // Prefer an exact id match.
+    const byId = steps.find((s) => s.id === String(indicator));
+    if (byId) {
+      return byId;
+    }
+
+    // Fall back to a zero-based numeric index (number or numeric string).
+    if (typeof indicator === 'number' || /^\d+$/.test(String(indicator))) {
+      const index = Number(indicator);
+      if (Number.isInteger(index) && index >= 0 && index < steps.length) {
+        return steps[index];
+      }
+    }
+
+    return null;
+  },
+
+  /**
+   * Upload the validated files for each `file` field to the Strapi media library
+   * and write the resulting media reference(s) into `submissionData` under the
+   * field name.
+   *
+   * Must be called only AFTER {@link ValidationService.validateFiles} has
+   * accepted the files, so oversize/disallowed files are never persisted. Uses
+   * the core upload plugin's programmatic service (always present — `upload` is
+   * a core Strapi plugin). A single uploaded file is stored as one reference
+   * object; multiple files as an array of references.
+   *
+   * @param fields - Form field definitions (only `file` fields are processed)
+   * @param files - Uploaded files keyed by field name (from the multipart parser)
+   * @param submissionData - Mutable submission data; file refs are written here
+   */
+  async processFileUploads(
+    fields: ValidatableField[],
+    files: UploadedFilesMap,
+    submissionData: Record<string, unknown>
+  ): Promise<void> {
+    const uploadService = strapi.plugin('upload').service('upload');
+
+    for (const field of fields) {
+      if (field.type !== 'file') {
+        continue;
+      }
+
+      const uploaded = files[field.name];
+      const fileList: UploadedFileMeta[] = uploaded
+        ? Array.isArray(uploaded)
+          ? uploaded
+          : [uploaded]
+        : [];
+
+      if (fileList.length === 0) {
+        continue;
+      }
+
+      // The upload service accepts an array of files in a single call and
+      // returns the array of persisted media records.
+      const created = (await uploadService.upload({
+        data: {},
+        files: fileList,
+      })) as Array<Record<string, unknown>>;
+
+      const refs = created.map((file) => this.toFileRef(file));
+
+      // Preserve single-vs-multiple semantics: a single uploaded file is stored
+      // as one object, multiple files as an array.
+      submissionData[field.name] = refs.length === 1 ? refs[0] : refs;
+    }
+  },
+
+  /**
+   * Map a persisted upload-plugin file record to the public-safe media reference
+   * we store in submission data.
+   *
+   * @param file - Raw file record returned by the upload service
+   */
+  toFileRef(file: Record<string, unknown>): SubmissionFileRef {
+    // The upload record stores `size` in KILOBYTES and `sizeInBytes` in bytes.
+    // Prefer the byte-accurate field for the stored reference.
+    const sizeBytes =
+      typeof file.sizeInBytes === 'number'
+        ? file.sizeInBytes
+        : typeof file.size === 'number'
+          ? file.size
+          : undefined;
+
+    return {
+      id: file.id as number,
+      ...(typeof file.documentId === 'string' ? { documentId: file.documentId } : {}),
+      url: (file.url as string) ?? '',
+      name: (file.name as string) ?? '',
+      ...(typeof file.mime === 'string' ? { mime: file.mime } : {}),
+      ...(sizeBytes !== undefined ? { size: sizeBytes } : {}),
     };
   },
 
@@ -249,6 +590,9 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
    * Update a submission record
    *
+   * When a submission's status or data changes, fires the `submission.updated`
+   * webhook event (in the background) for any webhook subscribed to it.
+   *
    * @param documentId - Submission documentId
    * @param data - Fields to update
    * @returns Updated submission record
@@ -259,14 +603,85 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       status: SubmissionStatus;
       data: Record<string, unknown>;
       metadata: Partial<SubmissionMetadata>;
-    }>
+    }>,
+    options: { triggerWebhooks?: boolean } = {}
   ): Promise<FormSubmission> {
-    const result = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
+    const { triggerWebhooks = true } = options;
+
+    const result = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
       documentId,
       data: data as Record<string, unknown>,
-    });
+      populate: ['form'],
+    })) as unknown as FormSubmission;
 
-    return result as unknown as FormSubmission;
+    // Fire the submission.updated webhook event in the background.
+    // Don't block the update response on webhook delivery. System-driven
+    // updates (e.g. auto-mark-as-read on first view) pass triggerWebhooks:false
+    // so merely opening a submission does not emit a webhook.
+    if (triggerWebhooks) {
+      this.triggerUpdateWebhooks(result, data).catch((error: Error) => {
+        strapi.log.error('[Strapi Forms] submission.updated webhook error:', error);
+      });
+    }
+
+    return result;
+  },
+
+  /**
+   * Trigger `submission.updated` webhooks for an updated submission.
+   *
+   * Loads the parent form (with settings) and dispatches to any webhook whose
+   * events include `submission.updated`.
+   *
+   * @param submission - The updated submission record (populated with form)
+   * @param changed - The fields that were updated (forwarded as webhook data)
+   */
+  async triggerUpdateWebhooks(
+    submission: FormSubmission,
+    changed: Record<string, unknown>
+  ): Promise<void> {
+    const formRef = submission.form as { documentId?: string } | undefined;
+    if (!formRef?.documentId) {
+      return;
+    }
+
+    const formService = strapi.plugin('strapi-forms').service('form');
+    const form = (await formService.findOne(formRef.documentId)) as SubmittableForm | null;
+
+    const webhooks = form?.settings?.webhooks;
+    if (!webhooks?.length) {
+      return;
+    }
+
+    const webhookService = strapi.plugin('strapi-forms').service('webhook');
+
+    const webhookFormContext = {
+      documentId: form!.documentId,
+      title: form!.title,
+      slug: form!.slug,
+    };
+
+    const webhookSubmissionContext = {
+      documentId: submission.documentId,
+      status: submission.status,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
+    };
+
+    // The webhook payload data is the submission's current data when available,
+    // otherwise the changed fields.
+    const payloadData =
+      submission.data && typeof submission.data === 'object'
+        ? submission.data
+        : (changed.data as Record<string, unknown> | undefined);
+
+    await webhookService.triggerAll(
+      webhooks,
+      'submission.updated',
+      webhookFormContext,
+      webhookSubmissionContext,
+      payloadData
+    );
   },
 
   /**
@@ -304,6 +719,63 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     return results;
+  },
+
+  /**
+   * Delete every submission older than `days` days (data-retention purge).
+   *
+   * Used by the daily retention cron job registered in bootstrap when the plugin
+   * config `dataRetentionDays` is greater than 0. Submissions whose `createdAt`
+   * predates `now - days` are removed in batches to avoid a single huge query
+   * that could exhaust the DB connection pool. Deleting through the low-level
+   * `strapi.db.query` (rather than the document service per-record) keeps the
+   * purge efficient for large tables.
+   *
+   * A non-positive `days` is treated as a no-op (retention disabled) and returns
+   * 0 without touching the database, so this is always safe to call.
+   *
+   * @param days - Retention window in days; submissions older than this are purged
+   * @returns The number of submissions deleted
+   */
+  async deleteOlderThan(days: number): Promise<number> {
+    if (typeof days !== 'number' || !Number.isFinite(days) || days <= 0) {
+      return 0;
+    }
+
+    const BATCH_SIZE = 1000;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    let totalDeleted = 0;
+    let deleted: number;
+
+    do {
+      // Fetch up to BATCH_SIZE expired ids first, then delete them by id.
+      const expired = (await strapi.db.query(SUBMISSION_CONTENT_TYPE_UID).findMany({
+        select: ['id'],
+        where: { created_at: { $lt: cutoff } },
+        limit: BATCH_SIZE,
+      })) as Array<{ id: number | string }>;
+
+      const ids = expired.map((row) => row.id);
+      deleted = ids.length;
+
+      if (deleted > 0) {
+        await strapi.db.query(SUBMISSION_CONTENT_TYPE_UID).deleteMany({
+          where: { id: { $in: ids } },
+        });
+        totalDeleted += deleted;
+      }
+
+      // A full batch likely means more rows remain; a short batch means done.
+    } while (deleted >= BATCH_SIZE);
+
+    if (totalDeleted > 0) {
+      strapi.log.info(
+        `[Strapi Forms] Data retention: deleted ${totalDeleted} submission(s) older than ${days} day(s).`
+      );
+    }
+
+    return totalDeleted;
   },
 
   /**
@@ -347,8 +819,11 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * @param documentId - Submission documentId
    * @returns Updated submission record
    */
-  async markAsRead(documentId: string): Promise<FormSubmission> {
-    return this.update(documentId, { status: 'read' });
+  async markAsRead(
+    documentId: string,
+    options: { triggerWebhooks?: boolean } = {}
+  ): Promise<FormSubmission> {
+    return this.update(documentId, { status: 'read' }, options);
   },
 
   /**
@@ -468,59 +943,6 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
           );
         });
     }
-  },
-
-  /**
-   * Export submissions as CSV (placeholder for export service)
-   *
-   * @param formId - Form documentId
-   * @param filters - Optional filters
-   * @returns CSV string
-   */
-  async exportToCsv(formId: string, filters: Record<string, unknown> = {}): Promise<string> {
-    const submissions = await this.find(formId, { filters });
-
-    if (submissions.length === 0) {
-      return '';
-    }
-
-    // Get all unique field names from submissions
-    const fieldNames = new Set<string>();
-    for (const submission of submissions) {
-      if (submission.data && typeof submission.data === 'object') {
-        Object.keys(submission.data).forEach((key) => fieldNames.add(key));
-      }
-    }
-
-    const headers = ['Submission ID', 'Status', 'Submitted At', ...Array.from(fieldNames)];
-
-    // Build CSV rows
-    const rows = submissions.map((submission) => {
-      const values = [
-        submission.documentId,
-        submission.status,
-        submission.createdAt,
-        ...Array.from(fieldNames).map((field) => {
-          const value = (submission.data as Record<string, unknown>)?.[field];
-          if (value === null || value === undefined) return '';
-          if (Array.isArray(value)) return value.join('; ');
-          return String(value);
-        }),
-      ];
-
-      // Escape CSV values
-      return values
-        .map((v) => {
-          const str = String(v);
-          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-            return `"${str.replace(/"/g, '""')}"`;
-          }
-          return str;
-        })
-        .join(',');
-    });
-
-    return [headers.join(','), ...rows].join('\n');
   },
 });
 
