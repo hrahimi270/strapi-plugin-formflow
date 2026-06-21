@@ -1,4 +1,19 @@
 import type { Core } from '@strapi/strapi';
+import {
+  isLayoutField,
+  isFieldVisible,
+  isEmptyValue,
+  validateUploadedFile,
+  type ConditionalRule,
+  type UploadedFileMeta,
+} from '../utils/validation-rules';
+import {
+  escapeHtml,
+  cleanString,
+  coerceNumber,
+  coerceBoolean,
+  stripControlChars,
+} from '../utils/sanitize';
 
 /**
  * Validation result structure returned by the validate method
@@ -21,6 +36,13 @@ export interface ValidationRule {
  * Form field structure for validation purposes
  */
 export interface ValidatableField {
+  /**
+   * Stable field id (present on stored form fields). Used to resolve multi-step
+   * step membership, since `settings.steps[].fields` stores field IDs while
+   * submission data is keyed by field `name`. Optional so ad-hoc field lists
+   * (without ids) still validate by name.
+   */
+  id?: string;
   type: string;
   name: string;
   label: string;
@@ -28,12 +50,20 @@ export interface ValidatableField {
   requiredMessage?: string;
   validation?: ValidationRule[];
   options?: Array<{ label: string; value: string }>;
+  /** Conditional display logic; if the field is hidden, it is skipped entirely. */
+  conditional?: ConditionalRule;
 }
 
+// Re-export the conditional rule type so consumers importing from the service
+// (e.g. submission service) have access to it alongside the validation types.
+export type { ConditionalRule, UploadedFileMeta };
+
 /**
- * Layout field types that don't require validation
+ * Map of uploaded files keyed by form field name. Each entry is either a single
+ * uploaded file or an array of them (for multi-file fields). Mirrors the shape
+ * of `ctx.request.files` produced by koa-body for a multipart submission.
  */
-const LAYOUT_FIELD_TYPES = ['heading', 'paragraph', 'divider'];
+export type UploadedFilesMap = Record<string, UploadedFileMeta | UploadedFileMeta[] | undefined>;
 
 /**
  * Validation service for form submissions
@@ -52,7 +82,21 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     for (const field of fields) {
       // Skip layout fields (heading, paragraph, divider)
-      if (LAYOUT_FIELD_TYPES.includes(field.type)) {
+      if (isLayoutField(field.type)) {
+        continue;
+      }
+
+      // File fields carry uploaded file metadata, not a value in `data`. They are
+      // validated separately by validateFiles() (called from the submission
+      // service with the multipart files map), so skip them here.
+      if (field.type === 'file') {
+        continue;
+      }
+
+      // Skip fields that are hidden by their conditional rule. A hidden field
+      // is not displayed to the user, so it must not enforce 'required' or any
+      // validation rule against (typically empty) submitted data.
+      if (!isFieldVisible(field.conditional, data)) {
         continue;
       }
 
@@ -73,7 +117,7 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       if (!this.isEmpty(value)) {
         // Run custom validation rules
         for (const rule of field.validation || []) {
-          const error = this.runValidationRule(rule, value, field);
+          const error = this.runValidationRule(rule, value, field, data);
           if (error) {
             fieldErrors.push(error);
           }
@@ -104,15 +148,120 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
+   * Validate only a SUBSET of a form's fields, identified by field id or name.
+   *
+   * Used by step-aware (multi-step) validation: only the fields belonging to a
+   * single wizard step are checked, so the frontend can validate one step at a
+   * time before the user advances. The filtered subset is then run through the
+   * identical per-field logic as {@link validate} (conditional visibility,
+   * required, custom rules, type checks, option whitelist), guaranteeing the
+   * per-step pass behaves exactly like the corresponding fields would in a full
+   * submission.
+   *
+   * Matching: a field is included when its `id` OR its `name` is present in
+   * `fieldKeys`. Step definitions store field IDs (`settings.steps[].fields`),
+   * but matching on name as well keeps the helper usable with name-based lists.
+   * Conditional visibility is still evaluated against the FULL `data` object, so
+   * a step field that depends on a value entered on an earlier step is resolved
+   * correctly.
+   *
+   * @param fields - Full array of form field definitions
+   * @param fieldKeys - Field ids and/or names that belong to the subset
+   * @param data - Submission data to validate (full data, keyed by field name)
+   * @returns ValidationResult covering only the matched subset of fields
+   */
+  validateSubset(
+    fields: ValidatableField[],
+    fieldKeys: string[] | Set<string>,
+    data: Record<string, unknown>
+  ): ValidationResult {
+    const keySet = fieldKeys instanceof Set ? fieldKeys : new Set(fieldKeys);
+
+    const subset = fields.filter(
+      (field) => (field.id !== undefined && keySet.has(field.id)) || keySet.has(field.name)
+    );
+
+    // Reuse the exact full-form per-field logic on the filtered subset.
+    return this.validate(subset, data);
+  },
+
+  /**
+   * Validate uploaded files against the form's `file` field definitions.
+   *
+   * Runs BEFORE the files are uploaded to the media library, so oversize or
+   * disallowed files are rejected without ever being persisted. Enforces:
+   *  - `required`: a required file field with no uploaded file errors,
+   *  - per-file `maxSize` (MB) and `allowedTypes` (MIME / extension) rules.
+   *
+   * Hidden file fields (by conditional rule) are skipped. Non-file fields are
+   * untouched (handled by {@link validate}).
+   *
+   * @param fields - Array of form field definitions
+   * @param files - Uploaded files keyed by field name (from the multipart parser)
+   * @param data - The non-file submission data (used for conditional visibility)
+   * @returns ValidationResult with valid flag and error messages by field name
+   */
+  validateFiles(
+    fields: ValidatableField[],
+    files: UploadedFilesMap,
+    data: Record<string, unknown> = {}
+  ): ValidationResult {
+    const errors: Record<string, string[]> = {};
+
+    for (const field of fields) {
+      if (field.type !== 'file') {
+        continue;
+      }
+
+      // A file field hidden by its conditional rule is not shown to the user and
+      // therefore must not enforce required/size/type constraints.
+      if (!isFieldVisible(field.conditional, data)) {
+        continue;
+      }
+
+      const uploaded = files[field.name];
+      const fileList: UploadedFileMeta[] = uploaded
+        ? Array.isArray(uploaded)
+          ? uploaded
+          : [uploaded]
+        : [];
+
+      const fieldErrors: string[] = [];
+
+      if (fileList.length === 0) {
+        if (field.required) {
+          fieldErrors.push(field.requiredMessage || `${field.label} is required`);
+        }
+        // No file uploaded and field optional -> nothing else to validate.
+        if (fieldErrors.length > 0) {
+          errors[field.name] = fieldErrors;
+        }
+        continue;
+      }
+
+      // Validate each uploaded file against the field's size/type rules.
+      for (const file of fileList) {
+        fieldErrors.push(...validateUploadedFile(file, field.validation || []));
+      }
+
+      if (fieldErrors.length > 0) {
+        errors[field.name] = fieldErrors;
+      }
+    }
+
+    return {
+      valid: Object.keys(errors).length === 0,
+      errors,
+    };
+  },
+
+  /**
    * Check if a value is considered empty
    * @param value - Value to check
    * @returns true if the value is empty, false otherwise
    */
   isEmpty(value: unknown): boolean {
-    if (value === null || value === undefined) return true;
-    if (typeof value === 'string' && value.trim() === '') return true;
-    if (Array.isArray(value) && value.length === 0) return true;
-    return false;
+    return isEmptyValue(value);
   },
 
   /**
@@ -120,9 +269,15 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * @param rule - Validation rule to execute
    * @param value - Value to validate
    * @param field - Field definition for context
+   * @param data - Full submission data (used by cross-field rules like 'matches')
    * @returns Error message if validation fails, null otherwise
    */
-  runValidationRule(rule: ValidationRule, value: unknown, field: ValidatableField): string | null {
+  runValidationRule(
+    rule: ValidationRule,
+    value: unknown,
+    field: ValidatableField,
+    data: Record<string, unknown> = {}
+  ): string | null {
     const ruleValue = rule.value;
 
     switch (rule.type) {
@@ -267,6 +422,25 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
         }
         break;
       }
+
+      case 'matches': {
+        // Cross-field equality (e.g. password confirmation).
+        // rule.value is the NAME of the other field this value must equal.
+        if (typeof ruleValue === 'string') {
+          const otherValue = data[ruleValue];
+          // Compare as strings so '1' (text input) matches 1, etc.
+          if (String(value) !== String(otherValue)) {
+            return rule.message || `${field.label} does not match`;
+          }
+        }
+        break;
+      }
+
+      case 'custom': {
+        // Safe no-op stub. Custom validation would require sandboxed evaluation
+        // of user-provided logic, which is intentionally not implemented here.
+        break;
+      }
     }
 
     return null;
@@ -391,9 +565,12 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     const allowedValues = field.options.map((opt) => opt.value);
 
-    if (field.type === 'checkbox' && Array.isArray(value)) {
-      // Checkbox allows multiple values
-      const invalidValues = value.filter((v) => !allowedValues.includes(String(v)));
+    if (field.type === 'checkbox') {
+      // Checkbox allows multiple values. Normalize a non-array value (e.g. a
+      // single selected option submitted as a scalar) to an array so every
+      // element is still checked against the allowed-options whitelist.
+      const values = Array.isArray(value) ? value : [value];
+      const invalidValues = values.filter((v) => !allowedValues.includes(String(v)));
       if (invalidValues.length > 0) {
         return `Invalid selection: ${invalidValues.join(', ')}`;
       }
@@ -419,7 +596,7 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     for (const field of fields) {
       // Skip layout fields
-      if (LAYOUT_FIELD_TYPES.includes(field.type)) {
+      if (isLayoutField(field.type)) {
         continue;
       }
 
@@ -435,7 +612,17 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Sanitize a single value based on field type
+   * Sanitize a single value based on field type for RAW storage.
+   *
+   * ESCAPE-ON-OUTPUT MODEL: Values are stored raw-but-cleaned. String values are
+   * stripped of null bytes / control characters and trimmed, but are NOT
+   * HTML-entity-escaped here. Escaping happens at each OUTPUT boundary instead:
+   *   - email HTML rendering must call escapeHtml() on interpolated values,
+   *   - CSV export must apply CSV escaping,
+   *   - admin UI relies on React's automatic escaping.
+   * Do NOT reintroduce escapeHtml() in this function — that would double-escape
+   * at the output boundaries and corrupt stored data.
+   *
    * @param type - Field type
    * @param value - Value to sanitize
    * @returns Sanitized value
@@ -452,40 +639,30 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       case 'url':
       case 'phone':
       case 'password': {
-        // Trim whitespace and escape HTML entities
-        if (typeof value === 'string') {
-          return this.escapeHtml(value.trim());
-        }
-        return this.escapeHtml(String(value));
+        // Strip control chars and trim; store RAW (escaped on output).
+        return cleanString(value);
       }
 
       case 'number': {
-        const numValue = Number(value);
-        return isNaN(numValue) ? 0 : numValue;
+        return coerceNumber(value);
       }
 
       case 'boolean': {
-        if (typeof value === 'boolean') return value;
-        if (value === 'true' || value === 1) return true;
-        if (value === 'false' || value === 0) return false;
-        return Boolean(value);
+        return coerceBoolean(value);
       }
 
       case 'checkbox': {
-        // Ensure checkbox values are always an array
+        // Ensure checkbox values are always an array of cleaned strings.
         if (Array.isArray(value)) {
-          return value.map((v) => this.escapeHtml(String(v).trim()));
+          return value.map((v) => cleanString(v));
         }
-        return [this.escapeHtml(String(value).trim())];
+        return [cleanString(value)];
       }
 
       case 'select':
       case 'radio': {
-        // Single selection, ensure string
-        if (typeof value === 'string') {
-          return this.escapeHtml(value.trim());
-        }
-        return this.escapeHtml(String(value));
+        // Single selection, cleaned string (raw, escaped on output).
+        return cleanString(value);
       }
 
       case 'date':
@@ -507,16 +684,15 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       }
 
       case 'hidden': {
-        // Hidden fields - escape HTML but preserve value
-        if (typeof value === 'string') {
-          return this.escapeHtml(value);
-        }
-        return this.escapeHtml(String(value));
+        // Hidden fields - strip control chars but preserve value (raw, no trim
+        // to avoid altering machine-generated tokens). Escaped on output.
+        return stripControlChars(typeof value === 'string' ? value : String(value));
       }
 
       case 'file': {
-        // File values should be handled separately (file upload processing)
-        // Return as-is for now
+        // File fields are resolved by the submission service: by the time this
+        // runs, the value is already a media reference (or array of them) of the
+        // shape { id, documentId, url, name, mime, size }. Store it verbatim.
         return value;
       }
 
@@ -526,17 +702,18 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Escape HTML entities to prevent XSS
+   * Escape HTML entities to prevent XSS.
+   *
+   * Provided for OUTPUT-boundary use (e.g. building email HTML). Under the
+   * escape-on-output model stored values are NOT escaped, so callers rendering
+   * stored data into HTML should escape with this helper at render time.
+   * Delegates to the shared util so the implementation lives in one place.
+   *
    * @param str - String to escape
    * @returns Escaped string
    */
   escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+    return escapeHtml(str);
   },
 
   /**

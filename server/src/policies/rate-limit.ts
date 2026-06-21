@@ -62,10 +62,13 @@ const CLEANUP_INTERVAL_MS = 60000;
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Start the periodic cleanup of expired rate limit entries
- * This prevents memory leaks from accumulated old entries
+ * Start the periodic cleanup of expired rate limit entries.
+ * This prevents memory leaks from accumulated old entries.
+ *
+ * Called from the plugin bootstrap so the timer's lifecycle is tied to the
+ * Strapi instance (and cleared in destroy) rather than to module load.
  */
-const startCleanupInterval = (): void => {
+export const startRateLimitCleanup = (): void => {
   if (cleanupInterval) return; // Already running
 
   cleanupInterval = setInterval(() => {
@@ -83,8 +86,15 @@ const startCleanupInterval = (): void => {
   }
 };
 
-// Start cleanup on module load
-startCleanupInterval();
+/**
+ * Stop the periodic cleanup timer. Called from the plugin destroy hook.
+ */
+export const stopRateLimitCleanup = (): void => {
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+};
 
 /**
  * Extract client IP address from request

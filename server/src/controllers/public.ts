@@ -1,5 +1,7 @@
 import type { Core } from '@strapi/strapi';
 
+import { STEP_INDICATOR_FIELD, type UploadedFilesMap } from '../services/submission';
+
 /**
  * Koa context interface for public controller methods
  */
@@ -10,6 +12,12 @@ export interface PublicContext {
     body: Record<string, unknown>;
     ip: string;
     headers: Record<string, string | string[] | undefined>;
+    /**
+     * Files parsed from a multipart/form-data submission, keyed by the
+     * multipart field name. Populated by the core `strapi::body` middleware
+     * (koa-body, patchKoa). Absent for JSON submissions.
+     */
+    files?: UploadedFilesMap;
   };
   status: number;
   notFound: (message?: string) => void;
@@ -91,12 +99,29 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
    * Validates and processes form submissions, storing them in the database.
    * Handles spam detection, validation errors, and returns appropriate responses.
    *
+   * STEP-AWARE VALIDATION (multi-step forms): an OPTIONAL `_step` control field
+   * in the request body switches this endpoint into a VALIDATE-ONLY mode. Its
+   * value is a step id or a zero-based step index. When present (and the form is
+   * multi-step with defined steps), ONLY the fields belonging to that step are
+   * validated and the response is `{ data: { valid, errors, step } }` — NO
+   * submission is created. When `_step` is ABSENT the endpoint behaves exactly
+   * as before: it validates ALL fields and persists the submission. Thus a
+   * normal full submission is completely unchanged by this feature.
+   *
    * @param ctx - Koa context with form data in request body
-   * @returns Success response with message/redirect or validation errors
+   * @returns Success response with message/redirect, per-step validation result,
+   *   or validation errors
    */
   async submitForm(ctx: PublicContext) {
     const { slug } = ctx.params;
-    const submissionData = ctx.request.body as Record<string, unknown>;
+
+    // For multipart/form-data submissions koa-body splits the request into text
+    // fields (ctx.request.body) and uploaded files (ctx.request.files, keyed by
+    // field name). For JSON submissions only the body is set and files is empty.
+    // Both content types are supported transparently.
+    const submissionData = (ctx.request.body || {}) as Record<string, unknown>;
+    const files = (ctx.request.files || {}) as UploadedFilesMap;
+    const hasFiles = Object.keys(files).length > 0;
 
     if (!slug || typeof slug !== 'string') {
       ctx.status = 400;
@@ -109,7 +134,9 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
       };
     }
 
-    if (!submissionData || typeof submissionData !== 'object') {
+    // A submission must carry either body fields or uploaded files. A
+    // file-only multipart submission has an empty body but non-empty files.
+    if ((!submissionData || typeof submissionData !== 'object') && !hasFiles) {
       ctx.status = 400;
       return {
         error: {
@@ -118,6 +145,78 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
           message: 'Request body is required',
         },
       };
+    }
+
+    // Step-aware (validate-only) branch. When the body carries the `_step`
+    // control field, validate ONLY that step and return without persisting.
+    // Absent `_step` -> fall through to the normal full-submission flow below.
+    const stepIndicator = submissionData[STEP_INDICATOR_FIELD];
+    if (stepIndicator !== undefined && stepIndicator !== null && stepIndicator !== '') {
+      try {
+        const stepResult = await strapi
+          .plugin('strapi-forms')
+          .service('submission')
+          .validateStep(slug, submissionData, stepIndicator as string | number);
+
+        // Mirror the full-submit contract: a step with field errors returns 400
+        // with the same ValidationError/details.errors.<field> shape, so the
+        // frontend can reuse one error-handling path. A valid step returns 200.
+        if (!stepResult.valid) {
+          ctx.status = 400;
+          return {
+            error: {
+              status: 400,
+              name: 'ValidationError',
+              message: 'Validation failed',
+              details: {
+                errors: stepResult.errors,
+                step: stepResult.step,
+              },
+            },
+          };
+        }
+
+        return {
+          data: {
+            valid: true,
+            step: stepResult.step,
+            errors: {},
+          },
+        };
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === 'Form not found') {
+            return ctx.notFound('Form not found');
+          }
+
+          if (error.message === 'Form is not accepting submissions') {
+            ctx.status = 403;
+            return {
+              error: {
+                status: 403,
+                name: 'ForbiddenError',
+                message: 'Form is not accepting submissions',
+              },
+            };
+          }
+
+          // The form is not multi-step or the indicated step does not exist:
+          // a client-side mistake, surfaced as a 400 rather than a 500.
+          if (error.message === 'Form is not multi-step' || error.message === 'Step not found') {
+            ctx.status = 400;
+            return {
+              error: {
+                status: 400,
+                name: 'BadRequestError',
+                message: error.message,
+              },
+            };
+          }
+        }
+
+        strapi.log.error('Error validating form step:', error);
+        ctx.throw(500, 'Internal server error');
+      }
     }
 
     // Collect client metadata for submission record
@@ -135,13 +234,15 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
       const result = await strapi
         .plugin('strapi-forms')
         .service('submission')
-        .submit(slug, submissionData, metadata);
+        .submit(slug, submissionData, metadata, files);
 
       return {
         data: {
           success: true,
           message: result.successMessage,
-          redirectUrl: result.redirectUrl,
+          // Normalized to null when absent so the honeypot fake-success body
+          // (spam-check middleware) is byte-identical and not fingerprintable.
+          redirectUrl: result.redirectUrl ?? null,
         },
       };
     } catch (error) {
@@ -173,17 +274,6 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
               status: 403,
               name: 'ForbiddenError',
               message: 'Form is not accepting submissions',
-            },
-          };
-        }
-
-        if (error.message === 'Spam detected') {
-          // Return success to prevent spam bots from knowing they were caught
-          // but don't actually store the submission
-          return {
-            data: {
-              success: true,
-              message: 'Thank you for your submission',
             },
           };
         }

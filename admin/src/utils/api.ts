@@ -12,12 +12,195 @@ export const API = {
 
   // Submissions
   submissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions`,
+  submissionStats: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions/stats`,
   submission: (id: string) => `/${PLUGIN_ID}/submissions/${id}`,
-  exportSubmissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/export`,
+  // Batch delete is a POST (Koa does not parse a DELETE request body), so the
+  // ids travel in the JSON body of POST /forms/:formId/submissions/bulk-delete.
+  bulkDeleteSubmissions: (formId: string) =>
+    `/${PLUGIN_ID}/forms/${formId}/submissions/bulk-delete`,
+  // NOTE: the export endpoint is nested under the submissions collection on the server
+  // (GET /strapi-forms/forms/:formId/submissions/export).
+  exportSubmissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions/export`,
 
   // Field Types
   fieldTypes: `/${PLUGIN_ID}/field-types`,
 } as const;
+
+/**
+ * Resolve the admin JWT the same way `@strapi/admin`'s fetch client does:
+ * primarily from localStorage (`jwtToken`), falling back to a cookie.
+ *
+ * Read fresh on every {@link rawRequest} call (never cached) so the latest token
+ * written by Strapi's session/refresh lifecycle is always used.
+ *
+ * Used by {@link rawRequest} for the one call the standard `useFetchClient`
+ * genuinely cannot perform: raw `text/csv` (or raw JSON text) exports. That
+ * client always JSON-parses the response body via `response.json()` and, for a
+ * `text/csv` body, swallows the resulting `SyntaxError` and returns `data: []`,
+ * discarding the export entirely. There is no `responseType`/`text` option on
+ * its `FetchOptions`, so a raw download must bypass it.
+ */
+const getAdminToken = (): string | null => {
+  try {
+    const fromStorage = window.localStorage.getItem('jwtToken');
+    if (fromStorage) {
+      return JSON.parse(fromStorage) as string;
+    }
+  } catch {
+    // ignore malformed storage values and fall through to the cookie
+  }
+
+  const match = document.cookie.match(/(?:^|;\s*)jwtToken=([^;]+)/);
+  if (match) {
+    try {
+      return JSON.parse(decodeURIComponent(match[1])) as string;
+    } catch {
+      return decodeURIComponent(match[1]);
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Prefix a plugin-relative URL with the configured Strapi backend URL.
+ */
+const withBackendUrl = (url: string): string => {
+  const backendURL = (window as unknown as { strapi?: { backendURL?: string } }).strapi?.backendURL;
+  const normalized = url.charAt(0) === '/' ? url : `/${url}`;
+  return backendURL ? `${backendURL}${normalized}` : normalized;
+};
+
+/**
+ * Options for {@link rawRequest}.
+ */
+export interface RawRequestOptions {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  body?: unknown;
+  accept?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Result of a {@link rawRequest} call.
+ */
+export interface RawRequestResult {
+  ok: boolean;
+  status: number;
+  text: string;
+}
+
+/**
+ * Attempt to extract a human-readable error message from a Strapi error
+ * response body. Strapi serializes errors as `{ error: { message } }`; fall
+ * back to the raw text (or undefined) when the body is not JSON.
+ */
+const extractErrorMessage = (text: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: string }; message?: string };
+    return parsed?.error?.message || parsed?.message || undefined;
+  } catch {
+    return text.trim() || undefined;
+  }
+};
+
+/**
+ * Perform an authenticated request using the native `fetch` API and return the
+ * raw response body as text. This intentionally bypasses `useFetchClient` for
+ * the one case it cannot handle: downloading a `text/csv` (or raw JSON) export
+ * without JSON-parsing (and discarding) it.
+ *
+ * KNOWN LIMITATION: unlike `useFetchClient`, this path does not participate in
+ * Strapi's `401 -> refresh token -> retry` lifecycle — it attaches the token as
+ * read at call time. If that token has expired the request 401s with no retry.
+ * The freshest token is read on every call ({@link getAdminToken}), so this only
+ * bites when the token expires mid-session with no intervening admin call to
+ * refresh it. A `401` is surfaced as a clear, actionable error telling the user
+ * to reload (which reissues a fresh token), rather than a generic failure.
+ *
+ * Throws a descriptive `Error` when the admin token cannot be resolved (so the
+ * request is never sent unauthenticated) and on any non-ok response, surfacing
+ * the server's error message when the body can be parsed.
+ */
+export const rawRequest = async (
+  url: string,
+  options: RawRequestOptions
+): Promise<RawRequestResult> => {
+  const token = getAdminToken();
+  if (!token) {
+    throw new Error('Your session has expired. Please reload the page and try again.');
+  }
+
+  const headers: Record<string, string> = {
+    Accept: options.accept ?? 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+
+  const init: RequestInit = {
+    method: options.method,
+    headers,
+    signal: options.signal,
+  };
+
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetch(withBackendUrl(url), init);
+  const text = await response.text();
+
+  if (!response.ok) {
+    // A 401 here means the locally-read token expired; this raw path cannot
+    // refresh/retry the way `useFetchClient` does, so steer the user to the
+    // one action that reissues a valid token: reloading the page.
+    if (response.status === 401) {
+      throw new Error('Your session has expired. Please reload the page and try again.');
+    }
+
+    const serverMessage = extractErrorMessage(text);
+    throw new Error(
+      serverMessage || `Request failed with status ${response.status}`
+    );
+  }
+
+  return { ok: response.ok, status: response.status, text };
+};
+
+/**
+ * All supported form field type names (18 total).
+ * Mirrors the server `getFieldTypes()` registry.
+ */
+export type FieldTypeName =
+  // basic
+  | 'text'
+  | 'textarea'
+  | 'email'
+  | 'number'
+  | 'phone'
+  | 'url'
+  | 'password'
+  // choice
+  | 'select'
+  | 'radio'
+  | 'checkbox'
+  | 'boolean'
+  // datetime
+  | 'date'
+  | 'time'
+  | 'datetime'
+  // advanced
+  | 'file'
+  | 'hidden'
+  // layout
+  | 'heading'
+  | 'paragraph'
+  | 'divider';
+
+/**
+ * Category grouping for field types (used by the field selector)
+ */
+export type FieldTypeCategory = 'basic' | 'choice' | 'datetime' | 'advanced' | 'layout';
 
 /**
  * Validation rule for form fields
@@ -50,6 +233,7 @@ export interface ConditionalRule {
  */
 export interface FormField {
   id: string;
+  /** One of {@link FieldTypeName}; kept as a widened `string` for forward-compatibility. */
   type: string;
   name: string;
   label: string;
@@ -63,6 +247,22 @@ export interface FormField {
   width?: 'full' | 'half';
   conditional?: ConditionalRule;
   attributes?: Record<string, unknown>;
+  /**
+   * When true, this field is omitted from CSV/JSON submission exports (e.g.
+   * sensitive values such as passwords or tokens). Defaults to false/absent, so
+   * existing fields continue to be exported.
+   */
+  excludeFromExport?: boolean;
+}
+
+/**
+ * A single step in a multi-step (wizard) form
+ */
+export interface FormStep {
+  id: string;
+  title: string;
+  description?: string;
+  fields: string[];
 }
 
 /**
@@ -76,6 +276,14 @@ export interface EmailNotification {
   subject: string;
   replyTo?: string;
   includeData?: boolean;
+  /**
+   * Optional custom email-body template. When non-empty, the server renders this
+   * string (substituting `{{...}}` placeholders) as the email body instead of the
+   * auto-generated layout. Supported placeholders: `{{form.title}}`, `{{form.slug}}`,
+   * `{{submission.id}}`, `{{submission.createdAt}}`, `{{data.fieldName}}`, and a
+   * `{{data}}` block that expands to all submitted fields. When empty/omitted the
+   * default auto-generated body is used.
+   */
   template?: string;
 }
 
@@ -99,11 +307,32 @@ export interface WebhookConfig {
 }
 
 /**
+ * Google reCAPTCHA configuration (part of spam protection)
+ */
+export interface RecaptchaConfig {
+  enabled: boolean;
+  siteKey: string;
+  secretKey: string;
+  version: 'v2' | 'v3';
+  threshold?: number;
+}
+
+/**
  * Spam protection settings
  */
 export interface SpamSettings {
   honeypot: boolean;
   honeypotFieldName: string;
+  recaptcha?: RecaptchaConfig;
+}
+
+/**
+ * Per-form rate limiting configuration
+ */
+export interface RateLimitConfig {
+  enabled: boolean;
+  maxSubmissions: number;
+  windowMs: number;
 }
 
 /**
@@ -114,9 +343,12 @@ export interface FormSettings {
   resetButtonText: string;
   showResetButton: boolean;
   layout: 'single' | 'multi-step';
+  steps?: FormStep[];
   emailNotifications: EmailNotification[];
   webhooks: WebhookConfig[];
   spam: SpamSettings;
+  rateLimit?: RateLimitConfig;
+  customCss?: string;
 }
 
 /**
@@ -171,14 +403,23 @@ export interface FormSubmissionDetail extends FormSubmission {
 }
 
 /**
- * Field type definition for form builder
+ * Field type definition for the form builder (returned by GET /field-types).
+ *
+ * NOTE: this is exported as `FieldType` for backward compatibility — existing
+ * hooks/components consume `FieldType` as this object shape. Use
+ * {@link FieldTypeName} for the string-literal union of the 18 type names.
  */
 export interface FieldType {
-  type: string;
+  type: FieldTypeName;
   label: string;
   icon: string;
-  category: 'basic' | 'choice' | 'datetime' | 'advanced' | 'layout';
+  category: FieldTypeCategory;
 }
+
+/**
+ * @deprecated Alias of {@link FieldType}. Prefer `FieldType` for the definition shape.
+ */
+export type FieldTypeDefinition = FieldType;
 
 /**
  * Generic API response wrapper
@@ -186,6 +427,31 @@ export interface FieldType {
 export interface ApiResponse<T> {
   data: T;
 }
+
+/**
+ * Pagination metadata returned by paginated endpoints
+ */
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  total: number;
+}
+
+/**
+ * Paginated API response wrapper (data + meta.pagination)
+ */
+export interface PaginatedResponse<T> {
+  data: T;
+  meta: {
+    pagination: PaginationMeta;
+  };
+}
+
+/**
+ * Paginated forms list response (matches the server contract)
+ */
+export type PaginatedForms = PaginatedResponse<Form[]>;
 
 /**
  * API error response
@@ -228,7 +494,7 @@ export interface FormsQueryParams {
   page?: number;
   pageSize?: number;
   sort?: string;
-  filters?: Record<string, unknown>;
+  _q?: string;
 }
 
 /**
@@ -239,4 +505,18 @@ export interface SubmissionsQueryParams {
   pageSize?: number;
   sort?: string;
   status?: SubmissionStatus;
+}
+
+/**
+ * Export format options for submissions
+ */
+export type ExportFormat = 'csv' | 'json';
+
+/**
+ * Options for exporting submissions
+ */
+export interface ExportOptions {
+  format?: ExportFormat;
+  status?: SubmissionStatus;
+  includeIp?: boolean;
 }

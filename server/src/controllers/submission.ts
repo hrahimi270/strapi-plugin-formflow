@@ -72,7 +72,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
           filters,
           sort: parseSort(sort),
           limit: pageSizeNum,
-          offset: (pageNum - 1) * pageSizeNum,
+          start: (pageNum - 1) * pageSizeNum,
         }),
         submissionService.count(formId, filters),
       ]);
@@ -115,9 +115,10 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         return ctx.notFound('Submission not found');
       }
 
-      // Auto-mark as read when viewing a new submission
+      // Auto-mark as read when viewing a new submission. This is a system-driven
+      // change (not an admin action), so suppress the submission.updated webhook.
       if (submission.status === 'new') {
-        await submissionService.markAsRead(id);
+        await submissionService.markAsRead(id, { triggerWebhooks: false });
         submission.status = 'read';
       }
 
@@ -199,9 +200,12 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Delete multiple submissions for a form
-   * DELETE /strapi-forms/forms/:formId/submissions
+   * POST /strapi-forms/forms/:formId/submissions/bulk-delete
    *
    * Body: { ids: string[] }
+   *
+   * Uses POST rather than DELETE because Koa/Strapi does not parse a request
+   * body on DELETE requests, so the { ids } payload would be undefined here.
    */
   async deleteMany(ctx: SubmissionContext) {
     const { formId } = ctx.params;
@@ -266,11 +270,19 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
    * Query params:
    * - status: Filter by status
    * - includeIp: Include IP address column (true/false)
+   * - includeUserAgent: Include user agent column (true/false)
+   * - includeMetadata: Include full metadata object (JSON export only, true/false)
    * - format: Export format (csv/json, default: csv)
    */
   async export(ctx: SubmissionContext) {
     const { formId } = ctx.params;
-    const { status, includeIp = 'false', format = 'csv' } = ctx.query;
+    const {
+      status,
+      includeIp = 'false',
+      includeUserAgent = 'false',
+      includeMetadata = 'false',
+      format = 'csv',
+    } = ctx.query;
 
     if (!formId) {
       return ctx.badRequest('Form ID is required');
@@ -298,6 +310,8 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         const json = await exportService.exportToJSON(formId, {
           filters,
           includeIp: includeIp === 'true',
+          includeUserAgent: includeUserAgent === 'true',
+          includeMetadata: includeMetadata === 'true',
         });
 
         ctx.set('Content-Type', 'application/json; charset=utf-8');
@@ -307,6 +321,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
         const csv = await exportService.exportToCSV(formId, {
           filters,
           includeIp: includeIp === 'true',
+          includeUserAgent: includeUserAgent === 'true',
         });
 
         ctx.set('Content-Type', 'text/csv; charset=utf-8');

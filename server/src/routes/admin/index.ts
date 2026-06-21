@@ -1,3 +1,19 @@
+/**
+ * Helper to build the standard admin policy chain: require an authenticated
+ * admin session, then check the user's ability for the given RBAC action(s).
+ *
+ * The action UIDs map 1:1 to the actions registered in `register.ts`
+ * (`plugin::strapi-forms.*`) and the admin constants in
+ * `admin/src/permissions.ts`. Super-admins always pass `admin::hasPermissions`.
+ */
+const protectedBy = (actions: string[]) => [
+  'admin::isAuthenticatedAdmin',
+  {
+    name: 'admin::hasPermissions',
+    config: { actions },
+  },
+];
+
 export default {
   type: 'admin',
   routes: [
@@ -7,7 +23,7 @@ export default {
       path: '/forms',
       handler: 'form.find',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.read']),
       },
     },
     {
@@ -15,7 +31,7 @@ export default {
       path: '/forms/count',
       handler: 'form.count',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.read']),
       },
     },
     {
@@ -23,7 +39,7 @@ export default {
       path: '/forms/:id',
       handler: 'form.findOne',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.read']),
       },
     },
     {
@@ -31,7 +47,7 @@ export default {
       path: '/forms',
       handler: 'form.create',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.create']),
       },
     },
     {
@@ -39,7 +55,7 @@ export default {
       path: '/forms/:id',
       handler: 'form.update',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.update']),
       },
     },
     {
@@ -47,24 +63,25 @@ export default {
       path: '/forms/:id',
       handler: 'form.delete',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.delete']),
       },
     },
     {
+      // Duplicating creates a new form, so it requires the create permission.
       method: 'POST',
       path: '/forms/:id/duplicate',
       handler: 'form.duplicate',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.create']),
       },
     },
-    // Field types for form builder
+    // Field types for form builder — needed by anyone who can read/build forms.
     {
       method: 'GET',
       path: '/field-types',
       handler: 'form.getFieldTypes',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.form.read']),
       },
     },
 
@@ -74,7 +91,7 @@ export default {
       path: '/forms/:formId/submissions',
       handler: 'submission.find',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.read']),
       },
     },
     {
@@ -82,7 +99,7 @@ export default {
       path: '/forms/:formId/submissions/stats',
       handler: 'submission.stats',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.read']),
       },
     },
     {
@@ -90,15 +107,19 @@ export default {
       path: '/forms/:formId/submissions/export',
       handler: 'submission.export',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.export']),
       },
     },
     {
-      method: 'DELETE',
-      path: '/forms/:formId/submissions',
+      // Bulk delete uses POST (not DELETE) because Koa/Strapi does not parse a
+      // request body on DELETE, so the { ids } payload would never reach the
+      // controller. Contract: POST /strapi-forms/forms/:formId/submissions/bulk-delete
+      // with body { ids: string[] } -> { data: { success, deleted } }.
+      method: 'POST',
+      path: '/forms/:formId/submissions/bulk-delete',
       handler: 'submission.deleteMany',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.delete']),
       },
     },
     {
@@ -106,7 +127,7 @@ export default {
       path: '/submissions/:id',
       handler: 'submission.findOne',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.read']),
       },
     },
     {
@@ -114,7 +135,7 @@ export default {
       path: '/submissions/:id',
       handler: 'submission.update',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.update']),
       },
     },
     {
@@ -122,7 +143,7 @@ export default {
       path: '/submissions/:id',
       handler: 'submission.delete',
       config: {
-        policies: [],
+        policies: protectedBy(['plugin::strapi-forms.submission.delete']),
       },
     },
   ],

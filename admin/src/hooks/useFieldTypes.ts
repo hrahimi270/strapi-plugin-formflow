@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useFetchClient } from '@strapi/strapi/admin';
 import { API, FieldType, ApiResponse } from '../utils/api';
 
-interface UseFieldTypesReturn {
+export interface UseFieldTypesReturn {
   fieldTypes: FieldType[];
   fieldTypesByCategory: Record<string, FieldType[]>;
   isLoading: boolean;
@@ -27,7 +27,7 @@ export const useFieldTypes = (): UseFieldTypesReturn => {
 
     try {
       const response = await get<ApiResponse<FieldType[]>>(API.fieldTypes);
-      setFieldTypes(response.data.data);
+      setFieldTypes(Array.isArray(response.data.data) ? response.data.data : []);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch field types';
       setError(new Error(errorMessage));
