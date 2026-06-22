@@ -101,6 +101,10 @@ public/uploads/*
 
 dist
 build
+/server/src/**/*.js
+/server/src/**/*.js.map
+/admin/src/**/*.js
+/admin/src/**/*.jsx
 
 
 ############################
