@@ -1,6 +1,6 @@
 {
-  "version": "0.0.0",
-  "keywords": [],
+  "version": "1.0.0",
+  "keywords": ["strapi", "strapi-plugin", "forms", "formflow", "form-builder"],
   "type": "commonjs",
   "exports": {
     "./package.json": "./package.json",
@@ -23,15 +23,20 @@
     "dist"
   ],
   "scripts": {
-    "build": "strapi-plugin build",
+    "build": "strapi-plugin build && node scripts/check-ee-bundled.mjs",
+    "check:ee": "node scripts/check-ee-bundled.mjs",
     "watch": "strapi-plugin watch",
     "watch:link": "strapi-plugin watch:link",
     "verify": "strapi-plugin verify",
     "test:ts:front": "run -T tsc -p admin/tsconfig.json",
-    "test:ts:back": "run -T tsc -p server/tsconfig.json"
+    "test:ts:back": "run -T tsc -p server/tsconfig.json",
+    "test:unit": "tsc server/src/ee/license/__tests__/no-key-submission.test.ts --rootDir . --outDir /tmp/sf-test-out --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck && node /tmp/sf-test-out/server/src/ee/license/__tests__/no-key-submission.test.js",
+    "prepublishOnly": "npm run build && npm run verify"
   },
   "dependencies": {
-    "uuid": "^13.0.0"
+    "pdfkit": "^0.15.0",
+    "uuid": "^13.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@strapi/design-system": "^2.0.0-rc.30",
@@ -39,6 +44,7 @@
     "@strapi/sdk-plugin": "^5.4.0",
     "@strapi/strapi": "^5.33.0",
     "@strapi/typescript-utils": "^5.33.0",
+    "@types/pdfkit": "^0.13.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
@@ -63,12 +69,23 @@
   },
   "strapi": {
     "kind": "plugin",
-    "name": "strapi-forms",
-    "displayName": "Strapi Forms",
-    "description": "Strapi Forms is a flexible Strapi v5 plugin for creating dynamic forms with configurable fields, validations, and submissions, designed for headless and API-first projects."
+    "name": "formflow",
+    "displayName": "FormFlow",
+    "description": "FormFlow is a flexible Strapi v5 plugin for creating dynamic forms with configurable fields, validations, and submissions, designed for headless and API-first projects."
   },
-  "name": "strapi-forms",
-  "description": "Strapi Forms is a flexible Strapi v5 plugin for creating dynamic forms with configurable fields, validations, and submissions, designed for headless and API-first projects.",
+  "name": "strapi-plugin-formflow",
+  "description": "FormFlow is a flexible Strapi v5 plugin for creating dynamic forms with configurable fields, validations, and submissions, designed for headless and API-first projects.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hrahimi270/strapi-plugin-formflow.git"
+  },
+  "homepage": "https://github.com/hrahimi270/strapi-plugin-formflow#readme",
+  "bugs": {
+    "url": "https://github.com/hrahimi270/strapi-plugin-formflow/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "author": "Bardiya <hrahimi270@gmail.com>"
 }
