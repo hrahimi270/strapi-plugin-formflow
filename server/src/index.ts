@@ -16,6 +16,8 @@ import policies from './policies';
 import routes from './routes';
 import services from './services';
 
+import './ee'; // side-effect import to prevent tree-shake of ee/ barrel
+
 export default {
   register,
   bootstrap,
