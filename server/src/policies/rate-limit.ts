@@ -126,7 +126,7 @@ const getClientIp = (ctx: RateLimitPolicyContext): string => {
  *
  * Usage in routes:
  * ```
- * policies: ['plugin::strapi-forms.rate-limit']
+ * policies: ['plugin::formflow.rate-limit']
  * ```
  *
  * Form settings example:
@@ -162,7 +162,7 @@ const rateLimitPolicy = async (
   try {
     // Get form to check rate limit settings
     const form = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .findBySlug(slug)) as FormWithRateLimit | null;
 
@@ -176,7 +176,7 @@ const rateLimitPolicy = async (
     // Validate rate limit settings
     if (!maxSubmissions || maxSubmissions <= 0 || !windowMs || windowMs <= 0) {
       strapi.log.warn(
-        `[Strapi Forms] Invalid rate limit settings for form "${slug}": ` +
+        `[FormFlow] Invalid rate limit settings for form "${slug}": ` +
           `maxSubmissions=${maxSubmissions}, windowMs=${windowMs}`
       );
       return true;
@@ -207,7 +207,7 @@ const rateLimitPolicy = async (
       const retryAfterSeconds = Math.ceil((record.resetTime - now) / 1000);
 
       strapi.log.warn(
-        `[Strapi Forms] Rate limit exceeded for form "${slug}" from IP ${ip}. ` +
+        `[FormFlow] Rate limit exceeded for form "${slug}" from IP ${ip}. ` +
           `Count: ${record.count}/${maxSubmissions}, retry after: ${retryAfterSeconds}s`
       );
 
@@ -231,7 +231,7 @@ const rateLimitPolicy = async (
   } catch (error) {
     // Log error but allow request (fail open)
     // This ensures the form remains usable even if rate limiting breaks
-    strapi.log.error('[Strapi Forms] rate-limit policy error:', error);
+    strapi.log.error('[FormFlow] rate-limit policy error:', error);
     return true;
   }
 };

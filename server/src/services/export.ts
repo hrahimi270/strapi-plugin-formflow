@@ -81,7 +81,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
   async exportToCSV(formId: string, options: ExportOptions = {}): Promise<string> {
     // Get form to get field definitions
     const form = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .findOne(formId)) as FormRecord | null;
 
@@ -91,7 +91,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     // Get submissions
     const submissions = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('submission')
       .find(formId, {
         filters: options.filters,
@@ -296,7 +296,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
   async exportToJSON(formId: string, options: ExportOptions = {}): Promise<string> {
     // Get form for metadata
     const form = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .findOne(formId)) as FormRecord | null;
 
@@ -306,7 +306,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     // Get submissions
     const submissions = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('submission')
       .find(formId, {
         filters: options.filters,
@@ -385,7 +385,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
     estimatedRows: number;
   }> {
     const form = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .findOne(formId)) as FormRecord | null;
 
@@ -394,7 +394,7 @@ const exportService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     const totalSubmissions = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('submission')
       .count(formId, filters);
 

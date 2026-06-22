@@ -12,6 +12,15 @@ export interface EmailNotificationConfig {
   replyTo?: string;
   includeData?: boolean;
   template?: string;
+  /** When true, this notification is an autoresponder sent to the submitter
+   *  rather than to the admin addresses in `to`. */
+  isAutoresponder?: boolean;
+  /** The form field name whose submitted value supplies the recipient address.
+   *  When omitted the first `email`-type field in the submission is used. */
+  toField?: string;
+  /** When true (and the license entitles `email.whiteLabel`), the
+   *  "Sent by FormFlow" footer is omitted from the email body. */
+  omitBranding?: boolean;
 }
 
 /**
@@ -72,35 +81,64 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     if (!config.to || config.to.length === 0) {
-      strapi.log.warn('[Strapi Forms] Email notification skipped: no recipients configured');
+      strapi.log.warn('[FormFlow] Email notification skipped: no recipients configured');
       return { success: false, error: 'No recipients configured' };
     }
 
     // Check if email plugin is available
     if (!strapi.plugins?.email?.services?.email) {
       strapi.log.error(
-        '[Strapi Forms] Email plugin not available. Please install and configure @strapi/plugin-email'
+        '[FormFlow] Email plugin not available. Please install and configure @strapi/plugin-email'
       );
       return { success: false, error: 'Email plugin not available' };
     }
 
     try {
+      // Custom email templates and reply-to are a Pro feature (email.customTemplate).
+      // When not entitled, the configured template is ignored entirely (treated as
+      // if unset) so the default body builders below provide the fallback.
+      const canCustomTemplate = strapi
+        .plugin('formflow')
+        .service('license')
+        .can('email.customTemplate');
+
       // Build email content. When a non-empty custom template is configured, render
       // it (substituting {{...}} placeholders) instead of the auto-generated body.
       // Otherwise fall back to the default layout. `template` is trimmed so a
       // whitespace-only value is treated as empty (uses the default body).
-      const customTemplate = config.template?.trim();
+      const customTemplate = canCustomTemplate ? config.template?.trim() : undefined;
       const includeData = config.includeData !== false; // Default to true
+
+      // White-label is a Pro feature (email.whiteLabel). The branding footer is
+      // omitted only when the user opted in (`config.omitBranding`) AND the
+      // license entitles it. EXEC gate: `can()` returns false when EE is stripped.
+      const omitBranding =
+        !!config.omitBranding &&
+        strapi.plugin('formflow').service('license').can('email.whiteLabel');
 
       let htmlContent: string;
       let textContent: string;
 
       if (customTemplate) {
-        htmlContent = this.renderTemplateHtml(customTemplate, form, submission, data);
-        textContent = this.renderTemplateText(customTemplate, form, submission, data);
+        htmlContent = await this.renderTemplateHtml(
+          customTemplate,
+          form,
+          submission,
+          data,
+          includeData,
+          omitBranding
+        );
+        textContent = await this.renderTemplateText(
+          customTemplate,
+          form,
+          submission,
+          data,
+          includeData,
+          omitBranding
+        );
       } else {
-        htmlContent = this.buildEmailHtml(form, submission, data, includeData);
-        textContent = this.buildEmailText(form, submission, data, includeData);
+        htmlContent = this.buildEmailHtml(form, submission, data, includeData, omitBranding);
+        textContent = this.buildEmailText(form, submission, data, includeData, omitBranding);
       }
 
       // Process subject with template variables
@@ -112,8 +150,9 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
         data
       );
 
-      // Process replyTo with template variables
-      let replyTo = config.replyTo;
+      // Process replyTo with template variables. replyTo is part of the Pro
+      // custom-template feature, so it is only applied when entitled.
+      let replyTo = canCustomTemplate ? config.replyTo : undefined;
       if (replyTo) {
         replyTo = this.replaceTemplateVariables(replyTo, form, submission, data);
         // Validate it looks like an email
@@ -146,7 +185,7 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
       await strapi.plugins.email.services.email.send(emailOptions);
 
       strapi.log.info(
-        `[Strapi Forms] Email notification sent for form "${form.title}" to: ${config.to.join(', ')}`
+        `[FormFlow] Email notification sent for form "${form.title}" to: ${config.to.join(', ')}`
       );
 
       return {
@@ -155,7 +194,7 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      strapi.log.error(`[Strapi Forms] Failed to send email notification: ${errorMessage}`);
+      strapi.log.error(`[FormFlow] Failed to send email notification: ${errorMessage}`);
 
       return {
         success: false,
@@ -171,7 +210,8 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
     form: EmailFormContext,
     submission: EmailSubmissionContext,
     data: Record<string, unknown>,
-    includeData: boolean
+    includeData: boolean,
+    omitBranding?: boolean
   ): string {
     const formattedDate = this.formatDate(submission.createdAt);
 
@@ -348,10 +388,16 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
     }
 
     html += `
-    </div>
+    </div>`;
+
+    if (!omitBranding) {
+      html += `
     <div class="footer">
-      <p>This email was sent automatically by Strapi Forms</p>
-    </div>
+      <p>This email was sent automatically by FormFlow</p>
+    </div>`;
+    }
+
+    html += `
   </div>
 </body>
 </html>`;
@@ -366,7 +412,8 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
     form: EmailFormContext,
     submission: EmailSubmissionContext,
     data: Record<string, unknown>,
-    includeData: boolean
+    includeData: boolean,
+    omitBranding?: boolean
   ): string {
     const formattedDate = this.formatDate(submission.createdAt);
 
@@ -403,8 +450,10 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
       }
     }
 
-    text += `${'─'.repeat(50)}\n`;
-    text += `This email was sent automatically by Strapi Forms\n`;
+    if (!omitBranding) {
+      text += `${'─'.repeat(50)}\n`;
+      text += `This email was sent automatically by FormFlow\n`;
+    }
 
     return text;
   },
@@ -557,39 +606,71 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
    * Render a custom email-body template into HTML.
    *
-   * Interpolated user/submission values are HTML-escaped exactly once (via
-   * {@link escapeHtml}) — this is the HTML escape boundary. The template's own
-   * literal markup is preserved verbatim, so authors can include HTML. Newlines
-   * in the rendered output are converted to <br> for readability.
+   * Delegates to the EE custom-template renderer (`ee/email`), injecting the MIT
+   * pure helpers (`escapeHtml`, `replaceTemplateVariables`) so the EE module
+   * stays free of `this` binding and never statically imports back into this
+   * service factory.
+   *
+   * The EE module is imported lazily and guarded: in a stripped MIT fork the
+   * import throws MODULE_NOT_FOUND, which we swallow and fall back to the default
+   * `buildEmailHtml` body. (In a stripped fork the custom-template branch is
+   * unreachable anyway because `can('email.customTemplate')` is false, so this
+   * fallback is defensive — it must never crash.)
    */
-  renderTemplateHtml(
+  async renderTemplateHtml(
     template: string,
     form: EmailFormContext,
     submission: EmailSubmissionContext,
-    data: Record<string, unknown>
-  ): string {
-    const rendered = this.replaceTemplateVariables(
-      template,
-      form,
-      submission,
-      data,
-      (text) => this.escapeHtml(text)
-    );
-    return rendered.replace(/\n/g, '<br>\n');
+    data: Record<string, unknown>,
+    includeData: boolean,
+    omitBranding?: boolean
+  ): Promise<string> {
+    try {
+      const { eeEmailService } = await import('../ee/email');
+      return eeEmailService({ strapi }).renderTemplateHtml(
+        template,
+        form,
+        submission,
+        data,
+        (text) => this.escapeHtml(text),
+        (t, f, s, d, escape) => this.replaceTemplateVariables(t, f, s, d, escape)
+      );
+    } catch {
+      // Stripped fork → free behaviour: default auto-generated body.
+      return this.buildEmailHtml(form, submission, data, includeData, omitBranding);
+    }
   },
 
   /**
    * Render a custom email-body template into plain text.
    *
-   * The plain-text variant is NEVER HTML-escaped — values are interpolated as-is.
+   * Delegates to the EE custom-template renderer (`ee/email`); the plain-text
+   * variant is NEVER HTML-escaped — values are interpolated as-is.
+   *
+   * Lazy + guarded like {@link renderTemplateHtml}: a missing `ee/email` module
+   * (stripped fork) degrades to the default `buildEmailText` body.
    */
-  renderTemplateText(
+  async renderTemplateText(
     template: string,
     form: EmailFormContext,
     submission: EmailSubmissionContext,
-    data: Record<string, unknown>
-  ): string {
-    return this.replaceTemplateVariables(template, form, submission, data);
+    data: Record<string, unknown>,
+    includeData: boolean,
+    omitBranding?: boolean
+  ): Promise<string> {
+    try {
+      const { eeEmailService } = await import('../ee/email');
+      return eeEmailService({ strapi }).renderTemplateText(
+        template,
+        form,
+        submission,
+        data,
+        (t, f, s, d) => this.replaceTemplateVariables(t, f, s, d)
+      );
+    } catch {
+      // Stripped fork → free behaviour: default auto-generated body.
+      return this.buildEmailText(form, submission, data, includeData, omitBranding);
+    }
   },
 
   /**
@@ -638,28 +719,6 @@ const emailService = ({ strapi }: { strapi: Core.Strapi }) => ({
   isValidEmail(email: string): boolean {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
-  },
-
-  /**
-   * Send multiple email notifications for a form submission
-   * Convenience method that processes all configured notifications
-   */
-  async sendAllNotifications(
-    notifications: EmailNotificationConfig[],
-    form: EmailFormContext,
-    submission: EmailSubmissionContext,
-    data: Record<string, unknown>
-  ): Promise<EmailSendResult[]> {
-    const results: EmailSendResult[] = [];
-
-    for (const notification of notifications) {
-      if (notification.enabled) {
-        const result = await this.sendSubmissionNotification(notification, form, submission, data);
-        results.push(result);
-      }
-    }
-
-    return results;
   },
 });
 

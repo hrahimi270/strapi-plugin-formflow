@@ -1,0 +1,35 @@
+{
+  "kind": "collectionType",
+  "collectionName": "form_analytics_events",
+  "info": {
+    "singularName": "form-analytics-event",
+    "pluralName": "form-analytics-events",
+    "displayName": "Form Analytics Event",
+    "description": "Append-only analytics events (view/start/completion/drop_off) per form"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": false
+    },
+    "content-type-builder": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "formDocumentId": {
+      "type": "string",
+      "required": true
+    },
+    "eventType": {
+      "type": "enumeration",
+      "enum": ["view", "start", "completion", "drop_off"],
+      "required": true
+    },
+    "stepId": {
+      "type": "string"
+    }
+  }
+}

@@ -103,9 +103,15 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
       const value = data[field.name];
       const fieldErrors: string[] = [];
 
-      // Check required field validation
-      if (field.required && this.isEmpty(value)) {
-        fieldErrors.push(field.requiredMessage || `${field.label} is required`);
+      // Check required field validation. A required `consent` field is special:
+      // an unchecked consent arrives as a *non-empty* falsy value (false /
+      // 'false' / 0), so `isEmpty` does not catch it — acceptance is required
+      // only when the consent coerces to `true`.
+      if (field.required) {
+        const consentNotAccepted = field.type === 'consent' && coerceBoolean(value) !== true;
+        if (this.isEmpty(value) || consentNotAccepted) {
+          fieldErrors.push(field.requiredMessage || `${field.label} is required`);
+        }
       }
 
       // Skip other validations if value is empty and field is not required
@@ -546,6 +552,67 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
         }
         break;
       }
+
+      case 'signature': {
+        // Base64 image data URL captured from the signature pad.
+        if (typeof value !== 'string' || !value.startsWith('data:image/')) {
+          return 'Signature must be a valid image data URL';
+        }
+        break;
+      }
+
+      case 'rating': {
+        // Whole-number rating / NPS score on a 1–10 scale.
+        const n = Number(value);
+        if (!(!isNaN(n) && n >= 1 && n <= 10 && Number.isInteger(n))) {
+          return 'Rating must be a whole number between 1 and 10';
+        }
+        break;
+      }
+
+      case 'address': {
+        // Either a raw address string or an object with at least one truthy
+        // string field (e.g. street). Reject empty string / empty object.
+        if (typeof value === 'string') {
+          if (value.trim() === '') {
+            return 'Address must be a non-empty value';
+          }
+        } else if (value && typeof value === 'object') {
+          const hasField = Object.values(value as Record<string, unknown>).some(
+            (v) => typeof v === 'string' && v.trim() !== ''
+          );
+          if (!hasField) {
+            return 'Address must be a non-empty value';
+          }
+        }
+        break;
+      }
+
+      case 'richtext': {
+        // HTML or Markdown string; no further validation (escaped on output).
+        break;
+      }
+
+      case 'calculated': {
+        // Read-only value computed server-side; accept any non-null value.
+        break;
+      }
+
+      case 'payment': {
+        // Capture-only: a Stripe PaymentIntent ID. No Stripe API call here.
+        if (typeof value !== 'string' || !value.startsWith('pi_')) {
+          return 'Payment reference must be a valid Stripe PaymentIntent ID';
+        }
+        break;
+      }
+
+      case 'consent': {
+        // A consent checkbox. Any value is accepted at the type level — whether
+        // a *required* consent must be checked is enforced in the per-field
+        // required check (which has access to `field.required`), since an
+        // unchecked consent (false/'false'/0) is non-empty and otherwise valid.
+        break;
+      }
     }
 
     return null;
@@ -647,7 +714,10 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
         return coerceNumber(value);
       }
 
-      case 'boolean': {
+      case 'boolean':
+      case 'consent': {
+        // Coerce to a real boolean so `submission.ts` can compare with `=== true`
+        // and store an accurate `metadata.consents[].accepted` flag.
         return coerceBoolean(value);
       }
 
@@ -694,6 +764,45 @@ const validationService = ({ strapi }: { strapi: Core.Strapi }) => ({
         // runs, the value is already a media reference (or array of them) of the
         // shape { id, documentId, url, name, mime, size }. Store it verbatim.
         return value;
+      }
+
+      case 'signature': {
+        // Base64 data URL stored raw-but-cleaned (escaped on output).
+        return cleanString(value);
+      }
+
+      case 'rating': {
+        return coerceNumber(value);
+      }
+
+      case 'address': {
+        // Raw string, or an object whose string fields are cleaned individually.
+        if (typeof value === 'string') {
+          return cleanString(value);
+        }
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          const cleaned: Record<string, unknown> = {};
+          for (const [key, fieldValue] of Object.entries(value)) {
+            cleaned[key] =
+              typeof fieldValue === 'string' ? cleanString(fieldValue) : fieldValue;
+          }
+          return cleaned;
+        }
+        return value;
+      }
+
+      case 'richtext': {
+        // Strip control chars but do NOT HTML-escape (escape-on-output).
+        return cleanString(value);
+      }
+
+      case 'calculated': {
+        // Server-computed value, already safe — store verbatim.
+        return value;
+      }
+
+      case 'payment': {
+        return cleanString(value);
       }
 
       default:
