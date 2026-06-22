@@ -1,1 +1,1 @@
-export const PLUGIN_ID = 'strapi-forms';
+export const PLUGIN_ID = 'formflow';
