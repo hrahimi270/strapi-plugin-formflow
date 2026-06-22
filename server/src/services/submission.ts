@@ -1010,6 +1010,14 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       // Send all configured notifications
       for (const notification of settings.emailNotifications) {
         if (notification.enabled && notification.to?.length) {
+          // On the free tier the single admin email is reserved for a regular
+          // (non-autoresponder) notification. Autoresponders are dispatched by the
+          // Pro-only Gate #6 below and are skipped on free, so they must never
+          // consume the one free admin slot — otherwise a free user who ordered
+          // [autoresponder, admin-notification] would receive no email at all.
+          if (!canAdvancedEmail && notification.isAutoresponder) {
+            continue;
+          }
           // Without email.advanced, stop after the first sent notification.
           if (sentCount >= 1 && !canAdvancedEmail) {
             break;
