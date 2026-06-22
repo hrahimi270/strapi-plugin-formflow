@@ -243,6 +243,116 @@ export const FieldPreview = ({ field }: FieldPreviewProps) => {
     );
   }
 
+  // Pro advanced field types — static, disabled placeholders. Real capture
+  // (signature pad, rating widget, address autocomplete, etc.) lives in the
+  // public form renderer; the builder only needs a recognisable preview.
+  if (field.type === 'signature') {
+    return (
+      <Field.Root name={field.name} hint={field.description || undefined}>
+        <PreviewLabel field={field} />
+        <Box
+          background="neutral100"
+          hasRadius
+          borderColor="neutral200"
+          borderStyle="dashed"
+          borderWidth="1px"
+          height="96px"
+        >
+          <Flex height="100%" justifyContent="center" alignItems="center">
+            <Typography variant="pi" textColor="neutral500">
+              Signature area
+            </Typography>
+          </Flex>
+        </Box>
+        {field.description ? <Field.Hint /> : null}
+      </Field.Root>
+    );
+  }
+
+  if (field.type === 'rating') {
+    return (
+      <Field.Root name={field.name} hint={field.description || undefined}>
+        <PreviewLabel field={field} />
+        <Flex direction="column" alignItems="flex-start" gap={1} paddingTop={1}>
+          <Flex gap={1}>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Box key={i}>
+                <Typography textColor="neutral300">★</Typography>
+              </Box>
+            ))}
+          </Flex>
+          <Typography variant="pi" textColor="neutral500">
+            1–10 scale
+          </Typography>
+        </Flex>
+        {field.description ? <Field.Hint /> : null}
+      </Field.Root>
+    );
+  }
+
+  if (field.type === 'address') {
+    return (
+      <Field.Root name={field.name} hint={field.description || undefined}>
+        <PreviewLabel field={field} />
+        <Textarea placeholder="Street, City, State, ZIP, Country" disabled readOnly />
+        {field.description ? <Field.Hint /> : null}
+      </Field.Root>
+    );
+  }
+
+  if (field.type === 'richtext') {
+    return (
+      <Field.Root name={field.name} hint={field.description || undefined}>
+        <PreviewLabel field={field} />
+        <Textarea placeholder="Rich text content…" disabled readOnly />
+        {field.description ? <Field.Hint /> : null}
+      </Field.Root>
+    );
+  }
+
+  if (field.type === 'calculated') {
+    return (
+      <Field.Root name={field.name} hint={field.description || undefined}>
+        <PreviewLabel field={field} />
+        <Box
+          padding={2}
+          paddingLeft={3}
+          paddingRight={3}
+          background="neutral100"
+          hasRadius
+        >
+          <Typography variant="pi" textColor="neutral500">
+            Calculated field — value computed on submit
+          </Typography>
+        </Box>
+        {field.description ? <Field.Hint /> : null}
+      </Field.Root>
+    );
+  }
+
+  if (field.type === 'payment') {
+    return (
+      <Field.Root name={field.name} hint={field.description || undefined}>
+        <PreviewLabel field={field} />
+        <Box
+          padding={2}
+          paddingLeft={3}
+          paddingRight={3}
+          background="neutral100"
+          hasRadius
+          borderColor="neutral200"
+          borderStyle="dashed"
+          borderWidth="1px"
+        >
+          <Typography variant="pi" textColor="neutral500">
+            Stripe payment field
+          </Typography>
+        </Box>
+        {field.description ? <Field.Hint /> : null}
+      </Field.Root>
+    );
+  }
+
   // Default: text-like inputs (text, email, number, phone, url, password)
   const inputType =
     field.type === 'number'

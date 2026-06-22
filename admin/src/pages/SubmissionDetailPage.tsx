@@ -31,6 +31,7 @@ import { getTranslation } from '../utils/getTranslation';
 import { SUBMISSION_PERMISSIONS } from '../permissions';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { SubmissionStatus, FormField } from '../utils/api';
+import ApprovalWorkflow from '../ee/components/ApprovalWorkflow';
 
 /**
  * Status options for the dropdown.
@@ -180,7 +181,7 @@ export const SubmissionDetailPage = () => {
   const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
 
-  const { submission, isLoading, isUpdating, error, updateStatus, deleteSubmission } =
+  const { submission, isLoading, isUpdating, error, updateStatus, deleteSubmission, refetch } =
     useSubmission(id);
 
   // Gate the status change (update) and delete actions. Super-admins pass all.
@@ -445,6 +446,15 @@ export const SubmissionDetailPage = () => {
                   </Field.Root>
                 </Box>
               </Box>
+
+              {/* Approval workflow (Business). Self-gates: renders an UpsellCard
+                  when the license is not entitled. */}
+              <ApprovalWorkflow
+                submissionId={submission.documentId}
+                approvalStatus={submission.approvalStatus}
+                approvalNote={submission.approvalNote}
+                onUpdated={refetch}
+              />
 
               <Box background="neutral0" hasRadius shadow="tableShadow" padding={6}>
                 <Typography variant="delta" fontWeight="bold" tag="h2">

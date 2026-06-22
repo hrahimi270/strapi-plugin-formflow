@@ -14,16 +14,23 @@ import {
   Checkbox,
 } from '@strapi/design-system';
 import { Plus, Trash, Eye, EyeStriked } from '@strapi/icons';
+import { useFetchClient, useNotification } from '@strapi/strapi/admin';
 import { useIntl } from 'react-intl';
 import { v4 as uuidv4 } from 'uuid';
 import styled from 'styled-components';
 
 import { getTranslation } from '../../utils/getTranslation';
-import { WebhookConfig, WebhookEvent } from '../../utils/api';
+import { API, WebhookConfig, WebhookEvent } from '../../utils/api';
+import { useLicense } from '../../ee/hooks/useLicense';
+import { GatedButton } from '../../ee/components/GatedButton';
+import { LockedSection } from '../../ee/components/LockedSection';
+import { UpsellCard } from '../../ee/components/UpsellCard';
 
 export interface WebhookSettingsProps {
   webhooks: WebhookConfig[];
   onChange: (webhooks: WebhookConfig[]) => void;
+  /** Document id of the form, used to scope the test-webhook request. */
+  formId: string;
 }
 
 /**
@@ -170,8 +177,12 @@ const EXAMPLE_PAYLOAD = {
 /**
  * WebhookSettings component for configuring webhook integrations
  */
-export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) => {
+export const WebhookSettings = ({ webhooks, onChange, formId }: WebhookSettingsProps) => {
   const { formatMessage } = useIntl();
+  const { post } = useFetchClient();
+  const { toggleNotification } = useNotification();
+  const { can } = useLicense();
+  const entitled = can('webhooks');
   // Editor-local state keyed by the webhook's stable id (never by array index).
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [urlErrors, setUrlErrors] = useState<Record<string, string>>({});
@@ -291,6 +302,53 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
     setShowSecrets((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  /**
+   * Fire a one-off test request for a single webhook against the server's
+   * `POST /forms/:formId/webhooks/test` endpoint. The server enforces the Pro
+   * gate authoritatively (402 + upsell when not entitled); the client surfaces
+   * the outcome as a notification.
+   */
+  const handleTestWebhook = async (index: number) => {
+    try {
+      await post(API.testWebhook(formId), items[index]);
+      toggleNotification({
+        type: 'success',
+        message: formatMessage({
+          id: getTranslation('notifications.webhook.test.success'),
+          defaultMessage: 'Test webhook sent successfully',
+        }),
+      });
+    } catch (err) {
+      const fetchErr = err as {
+        status?: number;
+        response?: { status?: number; data?: { error?: { status?: number } } };
+      };
+      const status =
+        fetchErr?.response?.data?.error?.status ??
+        fetchErr?.response?.status ??
+        fetchErr?.status;
+
+      if (status === 402) {
+        toggleNotification({
+          type: 'info',
+          message: formatMessage({
+            id: getTranslation('notifications.webhook.test.upsell'),
+            defaultMessage: 'Webhooks require a FormFlow Pro license.',
+          }),
+        });
+        return;
+      }
+
+      toggleNotification({
+        type: 'danger',
+        message: formatMessage({
+          id: getTranslation('notifications.webhook.test.error'),
+          defaultMessage: 'Failed to send test webhook',
+        }),
+      });
+    }
+  };
+
   return (
     <Flex direction="column" gap={4} alignItems="stretch">
       {/* Header */}
@@ -311,29 +369,40 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
             </Typography>
           </Box>
         </Box>
-        <Button size="S" startIcon={<Plus />} onClick={addWebhook}>
+        <GatedButton
+          can={entitled}
+          feature="webhooks"
+          size="S"
+          startIcon={<Plus />}
+          onClick={addWebhook}
+        >
           {formatMessage({
             id: getTranslation('notifications.webhook.add'),
             defaultMessage: 'Add webhook',
           })}
-        </Button>
+        </GatedButton>
       </Flex>
 
       {/* Empty State */}
       {items.length === 0 ? (
-        <Box padding={6} background="neutral100" hasRadius>
-          <Flex justifyContent="center">
-            <Typography textColor="neutral600">
-              {formatMessage({
-                id: getTranslation('notifications.webhook.empty'),
-                defaultMessage: 'No webhooks configured',
-              })}
-            </Typography>
-          </Flex>
-        </Box>
+        !entitled ? (
+          <UpsellCard feature="webhooks" />
+        ) : (
+          <Box padding={6} background="neutral100" hasRadius>
+            <Flex justifyContent="center">
+              <Typography textColor="neutral600">
+                {formatMessage({
+                  id: getTranslation('notifications.webhook.empty'),
+                  defaultMessage: 'No webhooks configured',
+                })}
+              </Typography>
+            </Flex>
+          </Box>
+        )
       ) : (
-        <Flex direction="column" gap={4} alignItems="stretch">
-          {items.map((webhook, index) => {
+        <LockedSection can={entitled} feature="webhooks" mode="readonly">
+          <Flex direction="column" gap={4} alignItems="stretch">
+            {items.map((webhook, index) => {
             const webhookId = webhook.id;
             return (
             <Box
@@ -371,17 +440,31 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
                     )}
                   </Typography>
                 </Checkbox>
-                <IconButton
-                  label={formatMessage({
-                    id: getTranslation('notifications.webhook.remove'),
-                    defaultMessage: 'Remove webhook',
-                  })}
-                  onClick={() => removeWebhook(webhookId, index)}
-                  variant="ghost"
-                  withTooltip={false}
-                >
-                  <Trash />
-                </IconButton>
+                <Flex gap={2} alignItems="center">
+                  <GatedButton
+                    can={entitled}
+                    feature="webhooks"
+                    size="S"
+                    variant="secondary"
+                    onClick={() => handleTestWebhook(index)}
+                  >
+                    {formatMessage({
+                      id: getTranslation('notifications.webhook.test'),
+                      defaultMessage: 'Test',
+                    })}
+                  </GatedButton>
+                  <IconButton
+                    label={formatMessage({
+                      id: getTranslation('notifications.webhook.remove'),
+                      defaultMessage: 'Remove webhook',
+                    })}
+                    onClick={() => removeWebhook(webhookId, index)}
+                    variant="ghost"
+                    withTooltip={false}
+                  >
+                    <Trash />
+                  </IconButton>
+                </Flex>
               </Flex>
 
               <Flex direction="column" gap={4} alignItems="stretch">
@@ -642,7 +725,8 @@ export const WebhookSettings = ({ webhooks, onChange }: WebhookSettingsProps) =>
             </Box>
             );
           })}
-        </Flex>
+          </Flex>
+        </LockedSection>
       )}
 
       {/* Example Payload */}

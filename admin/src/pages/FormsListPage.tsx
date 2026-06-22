@@ -35,8 +35,150 @@ import {
 
 import { useForms } from '../hooks';
 import { getTranslation } from '../utils/getTranslation';
-import { FORM_PERMISSIONS, SUBMISSION_PERMISSIONS } from '../permissions';
+import {
+  FORM_PERMISSIONS,
+  SUBMISSION_PERMISSIONS,
+  buildPerFormPermissions,
+  PER_FORM_RBAC_FEATURE,
+} from '../permissions';
+import { useLicense } from '../ee/hooks/useLicense';
 import type { Form, FormsQueryParams } from '../utils/api';
+
+interface FormRowProps {
+  form: Form;
+  /** When true, update/delete are scoped to this form via per-form RBAC. */
+  isPerFormRbacActive: boolean;
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  canReadSubmissions: boolean;
+  isDuplicating: boolean;
+  onEdit: (form: Form) => void;
+  onViewSubmissions: (form: Form) => void;
+  onDuplicate: (form: Form) => void;
+  onDelete: (form: Form) => void;
+}
+
+/**
+ * A single form table row.
+ *
+ * Extracted from the list so per-form RBAC can call `useRBAC` at a component's
+ * top level (Rules of Hooks forbid calling it inside `.map`). When
+ * `isPerFormRbacActive`, update/delete are gated by this form's per-document
+ * permissions; otherwise the globally-derived flags are used. Creation and
+ * submission-read stay global (no per-form scope for those).
+ */
+const FormRow = ({
+  form,
+  isPerFormRbacActive,
+  canCreate,
+  canUpdate,
+  canDelete,
+  canReadSubmissions,
+  isDuplicating,
+  onEdit,
+  onViewSubmissions,
+  onDuplicate,
+  onDelete,
+}: FormRowProps) => {
+  const { formatMessage } = useIntl();
+
+  // Always called (Rules of Hooks). The permissions passed are scoped to this
+  // form only when per-form RBAC is active; the result is otherwise ignored.
+  const {
+    allowedActions: { canUpdate: canUpdatePerForm, canDelete: canDeletePerForm },
+  } = useRBAC(buildPerFormPermissions(form.documentId));
+
+  const rowCanUpdate = isPerFormRbacActive ? canUpdatePerForm : canUpdate;
+  const rowCanDelete = isPerFormRbacActive ? canDeletePerForm : canDelete;
+
+  return (
+    <Tr
+      onClick={rowCanUpdate ? () => onEdit(form) : undefined}
+      style={rowCanUpdate ? { cursor: 'pointer' } : undefined}
+    >
+      <Td>
+        <Typography fontWeight="bold" textColor="neutral800">
+          {form.title}
+        </Typography>
+      </Td>
+      <Td>
+        <Typography textColor="neutral600">{form.slug}</Typography>
+      </Td>
+      <Td>
+        <Badge>{form.submissionCount}</Badge>
+      </Td>
+      <Td>
+        <Status variant={form.isActive ? 'success' : 'secondary'} size="S">
+          <Typography variant="omega" fontWeight="bold">
+            {form.isActive
+              ? formatMessage({
+                  id: getTranslation('forms.status.active'),
+                  defaultMessage: 'Active',
+                })
+              : formatMessage({
+                  id: getTranslation('forms.status.inactive'),
+                  defaultMessage: 'Inactive',
+                })}
+          </Typography>
+        </Status>
+      </Td>
+      <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <Flex gap={1} justifyContent="flex-end">
+          {canReadSubmissions && (
+            <IconButton
+              label={formatMessage({
+                id: getTranslation('forms.action.viewSubmissions'),
+                defaultMessage: 'View submissions',
+              })}
+              onClick={() => onViewSubmissions(form)}
+              variant="ghost"
+            >
+              <Eye />
+            </IconButton>
+          )}
+          {rowCanUpdate && (
+            <IconButton
+              label={formatMessage({
+                id: getTranslation('forms.action.edit'),
+                defaultMessage: 'Edit form',
+              })}
+              onClick={() => onEdit(form)}
+              variant="ghost"
+            >
+              <Pencil />
+            </IconButton>
+          )}
+          {canCreate && (
+            <IconButton
+              label={formatMessage({
+                id: getTranslation('forms.action.duplicate'),
+                defaultMessage: 'Duplicate form',
+              })}
+              onClick={() => onDuplicate(form)}
+              variant="ghost"
+              disabled={isDuplicating}
+            >
+              <Duplicate />
+            </IconButton>
+          )}
+          {rowCanDelete && (
+            <IconButton
+              label={formatMessage({
+                id: getTranslation('forms.action.delete'),
+                defaultMessage: 'Delete form',
+              })}
+              onClick={() => onDelete(form)}
+              variant="ghost"
+            >
+              <Trash />
+            </IconButton>
+          )}
+        </Flex>
+      </Td>
+    </Tr>
+  );
+};
 
 /**
  * Forms List Page - Main landing page for the plugin.
@@ -66,6 +208,11 @@ export const FormsListPage = () => {
   const {
     allowedActions: { canRead: canReadSubmissions },
   } = useRBAC(SUBMISSION_PERMISSIONS);
+
+  // Business tier: when entitled, row-level update/delete are scoped to per-form
+  // permissions (evaluated per row in <FormRow>). Defaults to false (global
+  // permissions) before the license resolves or in the free tier — UX only.
+  const isPerFormRbacActive = useLicense().can(PER_FORM_RBAC_FEATURE);
 
   // Delete confirmation state
   const [formToDelete, setFormToDelete] = useState<Form | null>(null);
@@ -251,91 +398,20 @@ export const FormsListPage = () => {
             </Thead>
             <Tbody>
               {forms.map((form) => (
-                <Tr
+                <FormRow
                   key={form.documentId}
-                  onClick={canUpdate ? () => handleEditForm(form) : undefined}
-                  style={canUpdate ? { cursor: 'pointer' } : undefined}
-                >
-                  <Td>
-                    <Typography fontWeight="bold" textColor="neutral800">
-                      {form.title}
-                    </Typography>
-                  </Td>
-                  <Td>
-                    <Typography textColor="neutral600">{form.slug}</Typography>
-                  </Td>
-                  <Td>
-                    <Badge>{form.submissionCount}</Badge>
-                  </Td>
-                  <Td>
-                    <Status variant={form.isActive ? 'success' : 'secondary'} size="S">
-                      <Typography variant="omega" fontWeight="bold">
-                        {form.isActive
-                          ? formatMessage({
-                              id: getTranslation('forms.status.active'),
-                              defaultMessage: 'Active',
-                            })
-                          : formatMessage({
-                              id: getTranslation('forms.status.inactive'),
-                              defaultMessage: 'Inactive',
-                            })}
-                      </Typography>
-                    </Status>
-                  </Td>
-                  <Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                    <Flex gap={1} justifyContent="flex-end">
-                      {canReadSubmissions && (
-                        <IconButton
-                          label={formatMessage({
-                            id: getTranslation('forms.action.viewSubmissions'),
-                            defaultMessage: 'View submissions',
-                          })}
-                          onClick={() => handleViewSubmissions(form)}
-                          variant="ghost"
-                        >
-                          <Eye />
-                        </IconButton>
-                      )}
-                      {canUpdate && (
-                        <IconButton
-                          label={formatMessage({
-                            id: getTranslation('forms.action.edit'),
-                            defaultMessage: 'Edit form',
-                          })}
-                          onClick={() => handleEditForm(form)}
-                          variant="ghost"
-                        >
-                          <Pencil />
-                        </IconButton>
-                      )}
-                      {canCreate && (
-                        <IconButton
-                          label={formatMessage({
-                            id: getTranslation('forms.action.duplicate'),
-                            defaultMessage: 'Duplicate form',
-                          })}
-                          onClick={() => handleDuplicateForm(form)}
-                          variant="ghost"
-                          disabled={isDuplicating === form.documentId}
-                        >
-                          <Duplicate />
-                        </IconButton>
-                      )}
-                      {canDelete && (
-                        <IconButton
-                          label={formatMessage({
-                            id: getTranslation('forms.action.delete'),
-                            defaultMessage: 'Delete form',
-                          })}
-                          onClick={() => setFormToDelete(form)}
-                          variant="ghost"
-                        >
-                          <Trash />
-                        </IconButton>
-                      )}
-                    </Flex>
-                  </Td>
-                </Tr>
+                  form={form}
+                  isPerFormRbacActive={isPerFormRbacActive}
+                  canCreate={canCreate}
+                  canUpdate={canUpdate}
+                  canDelete={canDelete}
+                  canReadSubmissions={canReadSubmissions}
+                  isDuplicating={isDuplicating === form.documentId}
+                  onEdit={handleEditForm}
+                  onViewSubmissions={handleViewSubmissions}
+                  onDuplicate={handleDuplicateForm}
+                  onDelete={setFormToDelete}
+                />
               ))}
             </Tbody>
           </Table>

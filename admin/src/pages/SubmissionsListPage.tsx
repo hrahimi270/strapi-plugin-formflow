@@ -21,9 +21,19 @@ import {
   Menu,
   Field,
   Switch,
+  TextInput,
   VisuallyHidden,
 } from '@strapi/design-system';
-import { Trash, Download, Eye, CheckCircle, Archive, CaretDown, WarningCircle } from '@strapi/icons';
+import {
+  Trash,
+  Download,
+  Eye,
+  CheckCircle,
+  Archive,
+  CaretDown,
+  WarningCircle,
+  ChartCircle,
+} from '@strapi/icons';
 import { EmptyDocuments } from '@strapi/icons/symbols';
 import {
   Page,
@@ -42,7 +52,9 @@ import { PLUGIN_ID } from '../pluginId';
 import { getTranslation } from '../utils/getTranslation';
 import { SUBMISSION_PERMISSIONS } from '../permissions';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { SubmissionStatus, ExportFormat, FormField } from '../utils/api';
+import { SubmissionStatus, ExportFormat, FormField, ScheduledExportConfig } from '../utils/api';
+import { useLicense } from '../ee/hooks/useLicense';
+import { ProBadge } from '../ee/components/ProBadge';
 
 /**
  * Status options for the filter dropdown.
@@ -187,6 +199,10 @@ const SubmissionsView = ({
   const { formatMessage } = useIntl();
   const { toggleNotification } = useNotification();
 
+  // License entitlement: advanced export (Excel/PDF/scheduled) is Pro-only.
+  // Free-on-failure — outside the provider `can()` is false and the items lock.
+  const { can } = useLicense();
+
   // Gate submission write/export actions. Super-admins pass all checks.
   const {
     allowedActions: { canUpdate, canDelete, canExport },
@@ -205,6 +221,9 @@ const SubmissionsView = ({
     bulkDelete,
     bulkUpdateStatus,
     exportSubmissions,
+    getScheduledExport,
+    saveScheduledExport,
+    removeScheduledExport,
   } = useSubmissions(formId, { page, pageSize, status });
 
   // Page changes flow through the URL; push them into the hook (no remount).
@@ -243,6 +262,37 @@ const SubmissionsView = ({
 
   // IP inclusion for export
   const [includeIp, setIncludeIp] = useState(false);
+
+  // Scheduled export (Pro). `scheduledConfig` is the saved schedule (or null);
+  // the dialog fields are local until saved.
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduledConfig, setScheduledConfig] = useState<ScheduledExportConfig | null>(null);
+  const [scheduleCron, setScheduleCron] = useState('0 8 * * 1');
+  const [scheduleEmails, setScheduleEmails] = useState('');
+  const [scheduleFormat, setScheduleFormat] = useState<'xlsx' | 'pdf' | 'csv'>('xlsx');
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+
+  // Load any saved schedule on mount when the user is entitled. Failures are
+  // swallowed — an unentitled/empty state simply shows "No schedule configured".
+  const canAdvancedExport = can('export.advanced');
+  useEffect(() => {
+    if (!canAdvancedExport) {
+      return;
+    }
+    let cancelled = false;
+    getScheduledExport()
+      .then((config) => {
+        if (!cancelled) {
+          setScheduledConfig(config);
+        }
+      })
+      .catch(() => {
+        /* no saved schedule / not reachable — leave as null */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canAdvancedExport, getScheduledExport]);
 
   const tabTitle = formatMessage({
     id: getTranslation('submissions.title'),
@@ -381,6 +431,90 @@ const SubmissionsView = ({
     }
   };
 
+  const openScheduleDialog = () => {
+    // Seed the dialog fields from the saved schedule when one exists.
+    if (scheduledConfig) {
+      setScheduleCron(scheduledConfig.cronExpression);
+      setScheduleEmails(scheduledConfig.recipientEmails.join(', '));
+      setScheduleFormat(scheduledConfig.format);
+    }
+    setScheduleDialogOpen(true);
+  };
+
+  const handleSaveSchedule = async () => {
+    const recipientEmails = scheduleEmails
+      .split(',')
+      .map((email) => email.trim())
+      .filter(Boolean);
+
+    if (!scheduleCron.trim() || recipientEmails.length === 0) {
+      toggleNotification({
+        type: 'danger',
+        message: formatMessage({
+          id: getTranslation('submissions.export.error'),
+          defaultMessage: 'Failed to export submissions',
+        }),
+      });
+      return;
+    }
+
+    const config: ScheduledExportConfig = {
+      cronExpression: scheduleCron.trim(),
+      recipientEmails,
+      format: scheduleFormat,
+    };
+
+    setIsSavingSchedule(true);
+    try {
+      await saveScheduledExport(config);
+      setScheduledConfig(config);
+      setScheduleDialogOpen(false);
+      toggleNotification({
+        type: 'success',
+        message: formatMessage({
+          id: getTranslation('submissions.export.schedule.active'),
+          defaultMessage: 'Scheduled export active',
+        }),
+      });
+    } catch {
+      toggleNotification({
+        type: 'danger',
+        message: formatMessage({
+          id: getTranslation('submissions.export.error'),
+          defaultMessage: 'Failed to export submissions',
+        }),
+      });
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
+  const handleRemoveSchedule = async () => {
+    setIsSavingSchedule(true);
+    try {
+      await removeScheduledExport();
+      setScheduledConfig(null);
+      setScheduleDialogOpen(false);
+      toggleNotification({
+        type: 'success',
+        message: formatMessage({
+          id: getTranslation('submissions.export.schedule.none'),
+          defaultMessage: 'No schedule configured',
+        }),
+      });
+    } catch {
+      toggleNotification({
+        type: 'danger',
+        message: formatMessage({
+          id: getTranslation('submissions.export.error'),
+          defaultMessage: 'Failed to export submissions',
+        }),
+      });
+    } finally {
+      setIsSavingSchedule(false);
+    }
+  };
+
   const handleStatusFilterChange = (value: string | number) => {
     setSelectedIds([]);
     // `ALL_STATUS_VALUE` is the explicit "All" option (and the empty value used
@@ -394,6 +528,13 @@ const SubmissionsView = ({
 
   const handleViewSubmission = (documentId: string) => {
     navigate(`/plugins/${PLUGIN_ID}/submissions/${documentId}`);
+  };
+
+  // Analytics dashboard (Pro). The page is its own license-aware route; this is
+  // the visible entry point. Disabled + ProBadge'd when not entitled.
+  const canAnalytics = can('analytics');
+  const handleViewAnalytics = () => {
+    navigate(`/plugins/${PLUGIN_ID}/forms/${formId}/analytics`);
   };
 
   if (isLoading && submissions.length === 0) {
@@ -426,6 +567,26 @@ const SubmissionsView = ({
                 defaultMessage: 'Unknown form',
               })
         }
+        secondaryAction={
+          canAnalytics ? (
+            <Button variant="secondary" startIcon={<ChartCircle />} onClick={handleViewAnalytics}>
+              {formatMessage({
+                id: getTranslation('submissions.analytics'),
+                defaultMessage: 'Analytics',
+              })}
+            </Button>
+          ) : (
+            <Button variant="secondary" startIcon={<ChartCircle />} disabled>
+              <Flex gap={2} alignItems="center">
+                {formatMessage({
+                  id: getTranslation('submissions.analytics'),
+                  defaultMessage: 'Analytics',
+                })}
+                <ProBadge tier="pro" />
+              </Flex>
+            </Button>
+          )
+        }
         primaryAction={
           canExport ? (
             <Menu.Root>
@@ -454,6 +615,49 @@ const SubmissionsView = ({
                     defaultMessage: 'Export as JSON',
                   })}
                 </Menu.Item>
+                {can('export.advanced') ? (
+                  <>
+                    <Menu.Item onSelect={() => handleExport('xlsx')}>
+                      {formatMessage({
+                        id: getTranslation('submissions.export.xlsx'),
+                        defaultMessage: 'Export as Excel (.xlsx)',
+                      })}
+                    </Menu.Item>
+                    <Menu.Item onSelect={() => handleExport('pdf')}>
+                      {formatMessage({
+                        id: getTranslation('submissions.export.pdf'),
+                        defaultMessage: 'Export as PDF',
+                      })}
+                    </Menu.Item>
+                    <Menu.Item onSelect={openScheduleDialog}>
+                      {formatMessage({
+                        id: getTranslation('submissions.export.schedule'),
+                        defaultMessage: 'Schedule export…',
+                      })}
+                    </Menu.Item>
+                  </>
+                ) : (
+                  <>
+                    <Menu.Item disabled>
+                      <Flex gap={2}>
+                        {formatMessage({
+                          id: getTranslation('submissions.export.xlsx'),
+                          defaultMessage: 'Export as Excel (.xlsx)',
+                        })}
+                        <ProBadge tier="pro" />
+                      </Flex>
+                    </Menu.Item>
+                    <Menu.Item disabled>
+                      <Flex gap={2}>
+                        {formatMessage({
+                          id: getTranslation('submissions.export.pdf'),
+                          defaultMessage: 'Export as PDF',
+                        })}
+                        <ProBadge tier="pro" />
+                      </Flex>
+                    </Menu.Item>
+                  </>
+                )}
               </Menu.Content>
             </Menu.Root>
           ) : null
@@ -786,6 +990,114 @@ const SubmissionsView = ({
             { count: selectedIds.length }
           )}
         </ConfirmDialog>
+      </Dialog.Root>
+
+      {/* Scheduled export (Pro). Inline dialog — no separate page/component. */}
+      <Dialog.Root open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+        <Dialog.Content>
+          <Dialog.Header>
+            {formatMessage({
+              id: getTranslation('submissions.export.schedule.dialog.title'),
+              defaultMessage: 'Schedule Export',
+            })}
+          </Dialog.Header>
+          <Dialog.Body>
+            <Flex direction="column" alignItems="stretch" gap={4} width="100%">
+              <Typography variant="pi" textColor="neutral600">
+                {scheduledConfig
+                  ? formatMessage({
+                      id: getTranslation('submissions.export.schedule.active'),
+                      defaultMessage: 'Scheduled export active',
+                    })
+                  : formatMessage({
+                      id: getTranslation('submissions.export.schedule.none'),
+                      defaultMessage: 'No schedule configured',
+                    })}
+              </Typography>
+
+              <Field.Root name="schedule-cron">
+                <Field.Label>
+                  {formatMessage({
+                    id: getTranslation('submissions.export.schedule.cron'),
+                    defaultMessage: 'Cron expression',
+                  })}
+                </Field.Label>
+                <TextInput
+                  value={scheduleCron}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setScheduleCron(e.target.value)
+                  }
+                  placeholder={formatMessage({
+                    id: getTranslation('submissions.export.schedule.cron.placeholder'),
+                    defaultMessage: '0 8 * * 1',
+                  })}
+                />
+              </Field.Root>
+
+              <Field.Root name="schedule-emails">
+                <Field.Label>
+                  {formatMessage({
+                    id: getTranslation('submissions.export.schedule.emails'),
+                    defaultMessage: 'Recipient email addresses (comma-separated)',
+                  })}
+                </Field.Label>
+                <TextInput
+                  value={scheduleEmails}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setScheduleEmails(e.target.value)
+                  }
+                  placeholder="alice@example.com, bob@example.com"
+                />
+              </Field.Root>
+
+              <Field.Root name="schedule-format">
+                <Field.Label>
+                  {formatMessage({
+                    id: getTranslation('submissions.export.schedule.format'),
+                    defaultMessage: 'Export format',
+                  })}
+                </Field.Label>
+                <SingleSelect
+                  value={scheduleFormat}
+                  onChange={(value: string | number) =>
+                    setScheduleFormat(value as 'xlsx' | 'pdf' | 'csv')
+                  }
+                >
+                  <SingleSelectOption value="xlsx">Excel (.xlsx)</SingleSelectOption>
+                  <SingleSelectOption value="pdf">PDF</SingleSelectOption>
+                  <SingleSelectOption value="csv">CSV</SingleSelectOption>
+                </SingleSelect>
+              </Field.Root>
+            </Flex>
+          </Dialog.Body>
+          <Dialog.Footer>
+            <Dialog.Cancel>
+              <Button variant="tertiary">
+                {formatMessage({ id: getTranslation('common.cancel'), defaultMessage: 'Cancel' })}
+              </Button>
+            </Dialog.Cancel>
+            <Flex gap={2}>
+              {scheduledConfig && (
+                <Button
+                  variant="danger-light"
+                  onClick={handleRemoveSchedule}
+                  loading={isSavingSchedule}
+                >
+                  {formatMessage({
+                    id: getTranslation('submissions.export.schedule.remove'),
+                    defaultMessage: 'Remove schedule',
+                  })}
+                </Button>
+              )}
+              <Button onClick={handleSaveSchedule} loading={isSavingSchedule}>
+                {formatMessage({
+                  id: getTranslation('submissions.export.schedule.save'),
+                  defaultMessage: 'Save schedule',
+                })}
+              </Button>
+            </Flex>
+          </Dialog.Footer>
+        </Dialog.Content>
       </Dialog.Root>
     </Page.Main>
   );

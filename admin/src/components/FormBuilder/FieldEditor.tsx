@@ -23,7 +23,9 @@ import { useIntl } from 'react-intl';
 import { getTranslation } from '../../utils/getTranslation';
 import { ValidationRulesEditor } from './ValidationRulesEditor';
 import { FieldPreview } from './FieldPreview';
-import type { FormField, FieldOption, ConditionalRule } from '../../utils/api';
+import { ConditionalLogicBuilder } from '../../ee/components/FormBuilder/ConditionalLogicBuilder';
+import { useLicense } from '../../ee/hooks/useLicense';
+import type { FormField, FieldOption } from '../../utils/api';
 
 export interface FieldEditorProps {
   field: FormField | null;
@@ -50,19 +52,6 @@ const LAYOUT_FIELD_TYPES = ['heading', 'paragraph', 'divider'];
 const DEFAULT_VALUE_FIELD_TYPES = ['text', 'textarea', 'email', 'number', 'hidden', 'url', 'phone'];
 
 /**
- * Conditional operators that do not require a value input.
- */
-const VALUELESS_OPERATORS: ConditionalRule['operator'][] = ['is_empty', 'is_not_empty'];
-
-const CONDITIONAL_OPERATORS: ConditionalRule['operator'][] = [
-  'equals',
-  'not_equals',
-  'contains',
-  'is_empty',
-  'is_not_empty',
-];
-
-/**
  * Generates a URL-friendly field name from a label
  */
 const generateFieldName = (label: string): string => {
@@ -81,6 +70,7 @@ const generateFieldName = (label: string): string => {
  */
 export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: FieldEditorProps) => {
   const { formatMessage } = useIntl();
+  const { can } = useLicense();
 
   // Tracks whether the user has manually edited the Name for the field currently
   // being edited. `field.name` is the submission-data key, so once the user takes
@@ -187,33 +177,6 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
     [field, onChange]
   );
 
-  // Conditional logic management
-  const handleToggleConditional = useCallback(
-    (enabled: boolean) => {
-      if (!enabled) {
-        onChange({ conditional: undefined });
-        return;
-      }
-      const firstField = conditionSourceFields[0];
-      onChange({
-        conditional: {
-          field: firstField ? firstField.name : '',
-          operator: 'equals',
-          value: '',
-        },
-      });
-    },
-    [conditionSourceFields, onChange]
-  );
-
-  const handleUpdateConditional = useCallback(
-    (updates: Partial<ConditionalRule>) => {
-      if (!field?.conditional) return;
-      onChange({ conditional: { ...field.conditional, ...updates } });
-    },
-    [field, onChange]
-  );
-
   // Handle modal open state change
   const handleOpenChange = (open: boolean) => {
     if (!open) {
@@ -222,15 +185,6 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
   };
 
   if (!field) return null;
-
-  const operatorLabel = (op: ConditionalRule['operator']) =>
-    formatMessage({
-      id: getTranslation(`fieldEditor.conditional.operator.${op}`),
-      defaultMessage: op,
-    });
-
-  const conditionalNeedsValue =
-    field.conditional && !VALUELESS_OPERATORS.includes(field.conditional.operator);
 
   return (
     <Modal.Root open={isOpen} onOpenChange={handleOpenChange}>
@@ -639,117 +593,12 @@ export const FieldEditor = ({ field, allFields, isOpen, onChange, onClose }: Fie
             {!isLayoutField && (
               <>
                 <Divider />
-                <Box>
-                  <Box marginBottom={3}>
-                    <Typography variant="sigma" textColor="neutral600" textTransform="uppercase">
-                      {formatMessage({
-                        id: getTranslation('fieldEditor.conditional.title'),
-                        defaultMessage: 'Conditional Logic',
-                      })}
-                    </Typography>
-                  </Box>
-
-                  {conditionSourceFields.length === 0 ? (
-                    <Box padding={3} background="neutral100" hasRadius>
-                      <Typography variant="pi" textColor="neutral600">
-                        {formatMessage({
-                          id: getTranslation('fieldEditor.conditional.noFields'),
-                          defaultMessage:
-                            'Add other input fields first to make this field conditional.',
-                        })}
-                      </Typography>
-                    </Box>
-                  ) : (
-                    <Flex direction="column" gap={3} alignItems="stretch">
-                      <Checkbox
-                        checked={Boolean(field.conditional)}
-                        onCheckedChange={(checked: boolean) => handleToggleConditional(checked)}
-                      >
-                        {formatMessage({
-                          id: getTranslation('fieldEditor.conditional.enable'),
-                          defaultMessage: 'Show this field conditionally',
-                        })}
-                      </Checkbox>
-
-                      {field.conditional && (
-                        <Grid.Root gap={3} gridCols={12}>
-                          <Grid.Item col={4} xs={12} direction="column" alignItems="stretch">
-                            <Field.Root name="conditional-field">
-                              <Field.Label>
-                                {formatMessage({
-                                  id: getTranslation('fieldEditor.conditional.field'),
-                                  defaultMessage: 'When field',
-                                })}
-                              </Field.Label>
-                              <SingleSelect
-                                value={field.conditional.field}
-                                onChange={(value: string | number) =>
-                                  handleUpdateConditional({ field: String(value) })
-                                }
-                              >
-                                {conditionSourceFields.map((f) => (
-                                  <SingleSelectOption key={f.id} value={f.name}>
-                                    {f.label || f.name}
-                                  </SingleSelectOption>
-                                ))}
-                              </SingleSelect>
-                            </Field.Root>
-                          </Grid.Item>
-
-                          <Grid.Item col={4} xs={12} direction="column" alignItems="stretch">
-                            <Field.Root name="conditional-operator">
-                              <Field.Label>
-                                {formatMessage({
-                                  id: getTranslation('fieldEditor.conditional.operator'),
-                                  defaultMessage: 'Operator',
-                                })}
-                              </Field.Label>
-                              <SingleSelect
-                                value={field.conditional.operator}
-                                onChange={(value: string | number) => {
-                                  const operator = value as ConditionalRule['operator'];
-                                  // Valueless operators (is_empty/is_not_empty) don't use a
-                                  // value, so clear any stale value in the same update.
-                                  handleUpdateConditional({
-                                    operator,
-                                    ...(VALUELESS_OPERATORS.includes(operator)
-                                      ? { value: undefined }
-                                      : {}),
-                                  });
-                                }}
-                              >
-                                {CONDITIONAL_OPERATORS.map((op) => (
-                                  <SingleSelectOption key={op} value={op}>
-                                    {operatorLabel(op)}
-                                  </SingleSelectOption>
-                                ))}
-                              </SingleSelect>
-                            </Field.Root>
-                          </Grid.Item>
-
-                          <Grid.Item col={4} xs={12} direction="column" alignItems="stretch">
-                            <Field.Root name="conditional-value">
-                              <Field.Label>
-                                {formatMessage({
-                                  id: getTranslation('fieldEditor.conditional.value'),
-                                  defaultMessage: 'Value',
-                                })}
-                              </Field.Label>
-                              <TextInput
-                                value={(field.conditional.value as string) || ''}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                  handleUpdateConditional({ value: e.target.value })
-                                }
-                                disabled={!conditionalNeedsValue}
-                                placeholder={conditionalNeedsValue ? 'Value' : 'N/A'}
-                              />
-                            </Field.Root>
-                          </Grid.Item>
-                        </Grid.Root>
-                      )}
-                    </Flex>
-                  )}
-                </Box>
+                <ConditionalLogicBuilder
+                  conditional={field.conditional}
+                  conditionSourceFields={conditionSourceFields}
+                  onChange={(conditional) => onChange({ conditional })}
+                  canEdit={can('conditionalLogic')}
+                />
               </>
             )}
           </Flex>
