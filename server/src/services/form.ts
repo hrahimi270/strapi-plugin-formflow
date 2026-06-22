@@ -9,6 +9,7 @@ export interface FieldType {
   label: string;
   icon: string;
   category: 'basic' | 'choice' | 'datetime' | 'advanced' | 'layout';
+  tier: 'free' | 'pro' | 'business';
 }
 
 /**
@@ -103,8 +104,34 @@ export interface FormSettings {
   customCss?: string;
 }
 
-const CONTENT_TYPE_UID = 'plugin::strapi-forms.form';
-const SUBMISSION_CONTENT_TYPE_UID = 'plugin::strapi-forms.form-submission';
+/**
+ * Per-locale content overrides for a single field (Business multi-language).
+ * Only UI content is localized — labels, placeholder, description and option
+ * labels — never field types, names, validation or conditional logic.
+ */
+export interface FieldLocaleOverride {
+  label?: string;
+  placeholder?: string;
+  description?: string;
+  options?: Array<{ label: string; value: string }>;
+}
+
+/**
+ * One locale's content overrides for a form: a map of fieldId -> override plus
+ * an optional localized success message.
+ */
+export interface FormLocaleContent {
+  fields?: Record<string, FieldLocaleOverride>;
+  successMessage?: string;
+}
+
+/**
+ * The `locales` JSON column on a form: locale code -> per-locale content.
+ */
+export type FormLocales = Record<string, FormLocaleContent>;
+
+const CONTENT_TYPE_UID = 'plugin::formflow.form';
+const SUBMISSION_CONTENT_TYPE_UID = 'plugin::formflow.form-submission';
 
 const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
@@ -166,6 +193,8 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
     successMessage?: string;
     redirectUrl?: string;
     isActive?: boolean;
+    requiresApproval?: boolean;
+    locales?: FormLocales;
   }) {
     // Generate UUIDs for fields if not provided and ensure proper ordering
     const processedFields = data.fields
@@ -206,6 +235,8 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
       redirectUrl?: string;
       isActive?: boolean;
       submissionCount?: number;
+      requiresApproval?: boolean;
+      locales?: FormLocales;
     }
   ) {
     // Process fields to ensure they have IDs and proper ordering
@@ -321,9 +352,16 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   /**
-   * Get form schema for public API consumption (sanitized)
+   * Get form schema for public API consumption (sanitized).
+   *
+   * When `options.locale` is provided and the form has a matching entry in its
+   * `locales` JSON map, the per-field content (label/placeholder/description/
+   * options) and the success message are replaced with that locale's overrides.
+   * Only the requested locale's content is applied — the raw `locales` map (which
+   * holds every locale) is never exposed. Serving a configured locale is always
+   * permitted; the entitlement gate lives only at form save time.
    */
-  async getPublicSchema(slug: string) {
+  async getPublicSchema(slug: string, options: { locale?: string } = {}) {
     const form = await this.findBySlug(slug);
 
     if (!form || !form.isActive) {
@@ -333,30 +371,47 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
     const settings = (form.settings || {}) as FormSettings;
     const fields = (form.fields || []) as FormField[];
 
+    // Resolve the requested locale's content overrides (if any). Absent/unknown
+    // locale falls through to the default content unchanged.
+    const locales = (form.locales || {}) as FormLocales;
+    const localeContent = options.locale ? locales[options.locale] : undefined;
+    const fieldOverrides = localeContent?.fields ?? {};
+
+    // Fire-and-forget view event — must not block or throw
+    strapi.plugin('formflow').service('analytics').recordEvent(form.documentId, 'view');
+
     // Return only public-safe data, excluding sensitive settings
     return {
       title: form.title,
       description: form.description,
       slug: form.slug,
-      fields: fields.map((field) => ({
-        id: field.id,
-        type: field.type,
-        name: field.name,
-        label: field.label,
-        placeholder: field.placeholder,
-        description: field.description,
-        required: field.required,
-        options: field.options,
-        defaultValue: field.defaultValue,
-        order: field.order,
-        width: field.width,
-        conditional: field.conditional,
-        validation: (field.validation || []).map((v) => ({
-          type: v.type,
-          value: v.value,
-          message: v.message,
-        })),
-      })),
+      // Localized success message takes precedence; omitted when neither the
+      // locale nor the form provides one (keeps the default response shape).
+      ...(localeContent?.successMessage
+        ? { successMessage: localeContent.successMessage }
+        : {}),
+      fields: fields.map((field) => {
+        const override = fieldOverrides[field.id] ?? {};
+        return {
+          id: field.id,
+          type: field.type,
+          name: field.name,
+          label: override.label ?? field.label,
+          placeholder: override.placeholder ?? field.placeholder,
+          description: override.description ?? field.description,
+          required: field.required,
+          options: override.options ?? field.options,
+          defaultValue: field.defaultValue,
+          order: field.order,
+          width: field.width,
+          conditional: field.conditional,
+          validation: (field.validation || []).map((v) => ({
+            type: v.type,
+            value: v.value,
+            message: v.message,
+          })),
+        };
+      }),
       settings: {
         submitButtonText: settings.submitButtonText || 'Submit',
         showResetButton: settings.showResetButton || false,
@@ -412,13 +467,13 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
   getFieldTypes(): FieldType[] {
     return [
       // Basic input fields
-      { type: 'text', label: 'Text', icon: 'text', category: 'basic' },
-      { type: 'textarea', label: 'Text Area', icon: 'text', category: 'basic' },
-      { type: 'email', label: 'Email', icon: 'mail', category: 'basic' },
-      { type: 'number', label: 'Number', icon: 'number', category: 'basic' },
-      { type: 'phone', label: 'Phone', icon: 'phone', category: 'basic' },
-      { type: 'url', label: 'URL', icon: 'link', category: 'basic' },
-      { type: 'password', label: 'Password', icon: 'lock', category: 'basic' },
+      { type: 'text', label: 'Text', icon: 'text', category: 'basic', tier: 'free' },
+      { type: 'textarea', label: 'Text Area', icon: 'text', category: 'basic', tier: 'free' },
+      { type: 'email', label: 'Email', icon: 'mail', category: 'basic', tier: 'free' },
+      { type: 'number', label: 'Number', icon: 'number', category: 'basic', tier: 'free' },
+      { type: 'phone', label: 'Phone', icon: 'phone', category: 'basic', tier: 'free' },
+      { type: 'url', label: 'URL', icon: 'link', category: 'basic', tier: 'free' },
+      { type: 'password', label: 'Password', icon: 'lock', category: 'basic', tier: 'free' },
 
       // Choice fields
       {
@@ -426,34 +481,39 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         label: 'Dropdown',
         icon: 'chevron-down',
         category: 'choice',
+        tier: 'free',
       },
       {
         type: 'radio',
         label: 'Radio Buttons',
         icon: 'circle',
         category: 'choice',
+        tier: 'free',
       },
       {
         type: 'checkbox',
         label: 'Checkboxes',
         icon: 'check-square',
         category: 'choice',
+        tier: 'free',
       },
       {
         type: 'boolean',
         label: 'Yes/No Toggle',
         icon: 'toggle',
         category: 'choice',
+        tier: 'free',
       },
 
       // Date/Time fields
-      { type: 'date', label: 'Date', icon: 'calendar', category: 'datetime' },
-      { type: 'time', label: 'Time', icon: 'clock', category: 'datetime' },
+      { type: 'date', label: 'Date', icon: 'calendar', category: 'datetime', tier: 'free' },
+      { type: 'time', label: 'Time', icon: 'clock', category: 'datetime', tier: 'free' },
       {
         type: 'datetime',
         label: 'Date & Time',
         icon: 'calendar',
         category: 'datetime',
+        tier: 'free',
       },
 
       // Advanced fields
@@ -462,23 +522,55 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
         label: 'File Upload',
         icon: 'upload',
         category: 'advanced',
+        tier: 'free',
       },
       {
         type: 'hidden',
         label: 'Hidden Field',
         icon: 'eye-off',
         category: 'advanced',
+        tier: 'free',
       },
 
       // Layout elements
-      { type: 'heading', label: 'Heading', icon: 'type', category: 'layout' },
+      { type: 'heading', label: 'Heading', icon: 'type', category: 'layout', tier: 'free' },
       {
         type: 'paragraph',
         label: 'Paragraph',
         icon: 'align-left',
         category: 'layout',
+        tier: 'free',
       },
-      { type: 'divider', label: 'Divider', icon: 'minus', category: 'layout' },
+      { type: 'divider', label: 'Divider', icon: 'minus', category: 'layout', tier: 'free' },
+
+      // Pro field types (Phase 2 validates/sanitizes; admin shows locked tiles)
+      { type: 'signature', label: 'Signature', icon: 'pen-tool', category: 'advanced', tier: 'pro' },
+      { type: 'rating', label: 'Rating / NPS', icon: 'star', category: 'advanced', tier: 'pro' },
+      { type: 'address', label: 'Address + Map', icon: 'map-pin', category: 'advanced', tier: 'pro' },
+      { type: 'richtext', label: 'Rich Text', icon: 'align-left', category: 'advanced', tier: 'pro' },
+      {
+        type: 'calculated',
+        label: 'Calculated Field',
+        icon: 'hash',
+        category: 'advanced',
+        tier: 'pro',
+      },
+      {
+        type: 'payment',
+        label: 'Stripe Payment',
+        icon: 'credit-card',
+        category: 'advanced',
+        tier: 'pro',
+      },
+
+      // Business field types (GDPR consent capture)
+      {
+        type: 'consent',
+        label: 'Consent Checkbox',
+        icon: 'check-square',
+        category: 'advanced',
+        tier: 'business',
+      },
     ];
   },
 
@@ -523,7 +615,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
       });
     } catch (error) {
       strapi.log.warn(
-        `[Strapi Forms] Failed to sync published submissionCount for form ${documentId}: ${
+        `[FormFlow] Failed to sync published submissionCount for form ${documentId}: ${
           error instanceof Error ? error.message : 'Unknown error'
         }`
       );
