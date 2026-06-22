@@ -4,6 +4,8 @@ import submission from './submission';
 import exportService from './export';
 import email from './email';
 import webhook from './webhook';
+import license from './license';
+import analytics from './analytics';
 
 export default {
   form,
@@ -12,4 +14,6 @@ export default {
   export: exportService,
   email,
   webhook,
+  license,
+  analytics,
 };
