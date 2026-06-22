@@ -12,7 +12,7 @@ type BadgeVariant = 'primary' | 'secondary' | 'success' | 'danger' | 'alternativ
  * Per-status visual + i18n configuration.
  */
 interface StatusConfig {
-  /** i18n message id (already namespaced, e.g. `strapi-forms.status.new`). */
+  /** i18n message id (already namespaced, e.g. `formflow.status.new`). */
   labelId: string;
   /** Fallback label used if no translation is available. */
   defaultLabel: string;
@@ -47,6 +47,11 @@ const STATUS_CONFIGS: Record<SubmissionStatus, StatusConfig> = {
     labelId: getTranslation('status.spam'),
     defaultLabel: 'Spam',
     variant: 'danger',
+  },
+  draft: {
+    labelId: getTranslation('status.draft'),
+    defaultLabel: 'Draft',
+    variant: 'secondary',
   },
 };
 

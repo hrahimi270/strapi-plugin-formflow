@@ -10,7 +10,6 @@ import {
   Badge,
   Divider,
   Field,
-  TextInput,
   SingleSelect,
   SingleSelectOption,
   Dialog,
@@ -26,6 +25,8 @@ import { useFieldTypes } from '../../hooks';
 import { FieldTypeSelector } from './FieldTypeSelector';
 import { FieldEditor } from './FieldEditor';
 import { FieldPreview } from './FieldPreview';
+import { StepsManager } from '../../ee/components/FormBuilder/StepsManager';
+import { useLicense } from '../../ee/hooks/useLicense';
 import type { FormField, FormSettings, FormStep } from '../../utils/api';
 
 export interface FormBuilderProps {
@@ -149,6 +150,7 @@ const DragHandle = styled(Flex)`
  */
 export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: FormBuilderProps) => {
   const { formatMessage } = useIntl();
+  const { can } = useLicense();
   const { fieldTypes, isLoading: isLoadingFieldTypes } = useFieldTypes();
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
@@ -315,33 +317,8 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
     setDropIndex(null);
   }, []);
 
-  // ----- Multi-step steps manager -----
-  const handleAddStep = useCallback(() => {
-    const newStep: FormStep = {
-      id: uuidv4(),
-      title: `Step ${steps.length + 1}`,
-      fields: [],
-    };
-    onSettingsChange({ ...settings, steps: [...steps, newStep] });
-  }, [steps, settings, onSettingsChange]);
-
-  const handleRenameStep = useCallback(
-    (stepId: string, title: string) => {
-      onSettingsChange({
-        ...settings,
-        steps: steps.map((s) => (s.id === stepId ? { ...s, title } : s)),
-      });
-    },
-    [steps, settings, onSettingsChange]
-  );
-
-  const handleRemoveStep = useCallback(
-    (stepId: string) => {
-      onSettingsChange({ ...settings, steps: steps.filter((s) => s.id !== stepId) });
-    },
-    [steps, settings, onSettingsChange]
-  );
-
+  // ----- Multi-step per-field assignment (the steps list itself is managed by
+  // the EE StepsManager component). -----
   const handleAssignFieldToStep = useCallback(
     (fieldId: string, stepId: string | null) => {
       const nextSteps = steps.map((s) => ({
@@ -370,79 +347,12 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
     <>
       {/* Multi-step manager */}
       {isMultiStep && (
-        <Box
-          background="neutral0"
-          hasRadius
-          shadow="tableShadow"
-          padding={5}
-          marginBottom={5}
-        >
-          <Flex justifyContent="space-between" alignItems="center" marginBottom={4}>
-            <Typography variant="delta" fontWeight="bold">
-              {formatMessage({
-                id: getTranslation('builder.steps.title'),
-                defaultMessage: 'Steps',
-              })}
-            </Typography>
-            <Button size="S" variant="secondary" startIcon={<Plus />} onClick={handleAddStep}>
-              {formatMessage({
-                id: getTranslation('builder.steps.add'),
-                defaultMessage: 'Add Step',
-              })}
-            </Button>
-          </Flex>
-
-          {steps.length === 0 ? (
-            <Box padding={4} background="neutral100" hasRadius textAlign="center">
-              <Typography variant="pi" textColor="neutral600">
-                {formatMessage({
-                  id: getTranslation('builder.steps.empty'),
-                  defaultMessage: 'No steps yet. Add a step to group your fields.',
-                })}
-              </Typography>
-            </Box>
-          ) : (
-            <Flex direction="column" gap={3} alignItems="stretch">
-              {steps.map((step, index) => (
-                <Flex key={step.id} gap={2} alignItems="flex-end">
-                  <Box flex="1">
-                    <Field.Root name={`step-${step.id}`}>
-                      <Field.Label>
-                        {formatMessage(
-                          {
-                            id: getTranslation('builder.steps.stepLabel'),
-                            defaultMessage: 'Step {number}',
-                          },
-                          { number: index + 1 }
-                        )}
-                      </Field.Label>
-                      <TextInput
-                        value={step.title}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleRenameStep(step.id, e.target.value)
-                        }
-                        placeholder="Step title"
-                      />
-                    </Field.Root>
-                  </Box>
-                  <Box>
-                    <IconButton
-                      label={formatMessage({
-                        id: getTranslation('builder.steps.remove'),
-                        defaultMessage: 'Remove step',
-                      })}
-                      variant="ghost"
-                      onClick={() => handleRemoveStep(step.id)}
-                      withTooltip={false}
-                    >
-                      <Trash />
-                    </IconButton>
-                  </Box>
-                </Flex>
-              ))}
-            </Flex>
-          )}
-        </Box>
+        <StepsManager
+          steps={steps}
+          settings={settings}
+          onSettingsChange={onSettingsChange}
+          canEdit={can('multistep')}
+        />
       )}
 
       {/* Fields builder */}
@@ -615,6 +525,7 @@ export const FormBuilder = ({ fields, onChange, settings, onSettingsChange }: Fo
                             onChange={(value: string | number) =>
                               handleAssignFieldToStep(field.id, value ? String(value) : null)
                             }
+                            disabled={!can('multistep')}
                           >
                             <SingleSelectOption value="">
                               {formatMessage({

@@ -12,6 +12,7 @@ import {
   SubmissionsQueryParams,
   ExportFormat,
   ExportOptions,
+  ScheduledExportConfig,
 } from '../utils/api';
 
 /**
@@ -51,6 +52,9 @@ export interface UseSubmissionsReturn {
     status?: SubmissionStatus,
     options?: { includeIp?: boolean }
   ) => Promise<void>;
+  getScheduledExport: () => Promise<ScheduledExportConfig | null>;
+  saveScheduledExport: (config: ScheduledExportConfig) => Promise<void>;
+  removeScheduledExport: () => Promise<void>;
 }
 
 /**
@@ -310,25 +314,40 @@ export const useSubmissions = (
           params.append('includeIp', 'true');
         }
 
-        const accept = format === 'csv' ? 'text/csv' : 'application/json';
+        const accept =
+          format === 'csv'
+            ? 'text/csv'
+            : format === 'xlsx'
+              ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+              : format === 'pdf'
+                ? 'application/pdf'
+                : 'application/json';
 
-        // `useFetchClient` always JSON-parses the response body, which would
-        // discard a `text/csv` export, so request the raw text via native fetch.
-        // `rawRequest` throws on a non-ok response (the server's message, or a
-        // clear "session expired" message on a 401 token-expiry).
+        // xlsx/pdf are binary and must be read as a Blob (reading them as text
+        // corrupts the bytes); csv/json are text. `useFetchClient` always
+        // JSON-parses the body, which would discard a text/csv or binary export,
+        // so go through `rawRequest`. It throws on a non-ok response (the
+        // server's message — including the 402 upsell — or a clear "session
+        // expired" message on a 401 token-expiry).
+        const isBinary = format === 'xlsx' || format === 'pdf';
         const response = await rawRequest(
           `${API.exportSubmissions(formId)}?${params.toString()}`,
           {
             method: 'GET',
             accept,
+            responseType: isBinary ? 'blob' : 'text',
           }
         );
 
-        const body = response.text;
-
-        const blob = new Blob([body], {
-          type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8',
-        });
+        const blob =
+          isBinary && response.blob
+            ? response.blob
+            : new Blob([response.text], {
+                type:
+                  format === 'csv'
+                    ? 'text/csv;charset=utf-8'
+                    : 'application/json;charset=utf-8',
+              });
 
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -353,6 +372,33 @@ export const useSubmissions = (
     [formId]
   );
 
+  /**
+   * Read the form's active scheduled-export config (Pro feature). Returns null
+   * when no schedule is saved. Not gated client-side — the server allows reading.
+   */
+  const getScheduledExport = useCallback(async (): Promise<ScheduledExportConfig | null> => {
+    const { data } = await get<{ data: ScheduledExportConfig | null }>(
+      API.scheduleExport(formId)
+    );
+    return data.data ?? null;
+  }, [formId, get]);
+
+  /**
+   * Save (create/replace) the form's scheduled-export config. The server gates
+   * this behind `export.advanced` and returns 402 when unentitled.
+   */
+  const saveScheduledExport = useCallback(
+    async (config: ScheduledExportConfig): Promise<void> => {
+      await post(API.scheduleExport(formId), config);
+    },
+    [formId, post]
+  );
+
+  /** Remove the form's scheduled-export config and its cron entry. */
+  const removeScheduledExport = useCallback(async (): Promise<void> => {
+    await del(API.scheduleExport(formId));
+  }, [formId, del]);
+
   return {
     submissions,
     pagination,
@@ -372,6 +418,9 @@ export const useSubmissions = (
     markAsRead,
     markAsArchived,
     exportSubmissions,
+    getScheduledExport,
+    saveScheduledExport,
+    removeScheduledExport,
   };
 };
 
