@@ -595,7 +595,7 @@ const formService = ({ strapi }: { strapi: Core.Strapi }) => ({
    */
   async incrementSubmissionCount(documentId: string) {
     const total = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).count({
-      filters: { form: { documentId } },
+      filters: { form: { documentId }, status: { $ne: 'draft' } },
     });
 
     // 1. Write to the draft only (default target for the document service).
