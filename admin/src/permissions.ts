@@ -64,17 +64,3 @@ export const PERMISSIONS: {
   form: FORM_PERMISSIONS,
   submission: SUBMISSION_PERMISSIONS,
 };
-
-/**
- * Build per-form permission objects for a specific form document ID.
- * Only used when the Business tier RBAC feature is active.
- * Falls back to global permissions when documentId is absent.
- */
-export const buildPerFormPermissions = (documentId: string) => ({
-  read: [buildPermission(`plugin::formflow.form.read.${documentId}`)],
-  create: [buildPermission(`plugin::formflow.form.create.${documentId}`)],
-  update: [buildPermission(`plugin::formflow.form.update.${documentId}`)],
-  delete: [buildPermission(`plugin::formflow.form.delete.${documentId}`)],
-});
-
-export const PER_FORM_RBAC_FEATURE = 'compliance.rbac' as const;

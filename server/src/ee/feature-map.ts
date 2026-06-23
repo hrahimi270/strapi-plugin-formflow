@@ -36,7 +36,6 @@ export type FeatureKey =
   // Business — compliance
   | 'compliance.retention'
   | 'compliance.anonymizeIp'
-  | 'compliance.rbac'
   | 'compliance.consent'
   | 'compliance.audit'
   // Business — workflow / i18n
@@ -72,7 +71,6 @@ export const FEATURE_TIER: Record<FeatureKey, Tier> = {
   // Business
   'compliance.retention': 'business',
   'compliance.anonymizeIp': 'business',
-  'compliance.rbac': 'business',
   'compliance.consent': 'business',
   'compliance.audit': 'business',
   approval: 'business',

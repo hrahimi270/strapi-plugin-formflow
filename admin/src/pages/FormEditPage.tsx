@@ -26,8 +26,7 @@ import {
 import { useIntl } from 'react-intl';
 
 import { getTranslation } from '../utils/getTranslation';
-import { FORM_PERMISSIONS, buildPerFormPermissions, PER_FORM_RBAC_FEATURE } from '../permissions';
-import { useLicense } from '../ee/hooks/useLicense';
+import { FORM_PERMISSIONS } from '../permissions';
 import { useForm } from '../hooks';
 import type { FormApiError } from '../hooks/useForm';
 import { FormBuilder } from '../components/FormBuilder';
@@ -192,20 +191,14 @@ export const FormEditPage = () => {
 
   const { form, isLoading, isSaving, error, createForm, updateForm } = useForm(documentId);
 
-  // Business tier: when editing an existing form and entitled, update/delete are
-  // scoped to this form's per-document permissions. Creating a new form has no
-  // document yet, so it always uses the global permissions. Defaults to false
-  // (global) before the license resolves or in the free tier — UX only.
-  const isPerFormRbacActive = useLicense().can(PER_FORM_RBAC_FEATURE);
-
-  // Saving maps to create (new form) or update (existing form). The relevant
-  // route is also protected server-side; this just keeps the UI honest.
+  // Saving maps to create (new form) or update (existing form). Gated by the
+  // global `form.create`/`form.update` actions — the editor must never lock out
+  // an authorized user (super-admins always hold these). The route remains the
+  // authoritative source of truth.
   const {
     isLoading: isLoadingRBAC,
     allowedActions: { canCreate, canUpdate },
-  } = useRBAC(
-    !isCreating && isPerFormRbacActive ? buildPerFormPermissions(documentId!) : FORM_PERMISSIONS
-  );
+  } = useRBAC(FORM_PERMISSIONS);
   const canSave = isCreating ? canCreate : canUpdate;
 
   const [formData, setFormData] = useState<FormData>(getEmptyFormData());

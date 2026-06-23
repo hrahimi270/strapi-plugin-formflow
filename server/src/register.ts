@@ -11,19 +11,6 @@ import type { Core } from '@strapi/strapi';
  * route policies in `routes/admin/index.ts` and the admin permission constants
  * in `admin/src/permissions.ts`.
  */
-/**
- * Shape of a single per-form RBAC action registered when the Business-tier
- * `compliance.rbac` feature is entitled. Exported to satisfy the TS export rule
- * (it appears in the `register` module's emitted types via `registerMany`).
- */
-export interface PerFormRBACAction {
-  section: 'plugins';
-  displayName: string;
-  uid: string;
-  pluginName: 'formflow';
-  subCategory: string;
-}
-
 export const RBAC_ACTIONS = [
   {
     section: 'plugins',
@@ -263,62 +250,6 @@ const register = async ({ strapi }: { strapi: Core.Strapi }) => {
   } catch (error) {
     strapi.log.warn(
       `[FormFlow] Failed to register RBAC permission actions: ${
-        error instanceof Error ? error.message : 'Unknown error'
-      }`
-    );
-  }
-
-  // Business tier: register per-form RBAC actions so admins can scope read/
-  // create/update/delete to individual forms in Settings → Roles. Gated behind
-  // `compliance.rbac` via the MIT license wrapper (lazy lookup — never a static
-  // import of `ee/`). Wrapped defensively so it never blocks plugin load; when
-  // unentitled the global eight actions remain the only ones registered.
-  try {
-    const license = strapi.plugin('formflow').service('license');
-
-    if (license?.can('compliance.rbac')) {
-      const forms = await strapi
-        .documents('plugin::formflow.form')
-        .findMany({ fields: ['documentId', 'title'] });
-
-      for (const form of forms) {
-        const perFormActions: PerFormRBACAction[] = [
-          {
-            section: 'plugins',
-            displayName: `Read "${form.title}" form`,
-            uid: `form.read.${form.documentId}`,
-            pluginName: 'formflow',
-            subCategory: form.title,
-          },
-          {
-            section: 'plugins',
-            displayName: `Create submissions for "${form.title}"`,
-            uid: `form.create.${form.documentId}`,
-            pluginName: 'formflow',
-            subCategory: form.title,
-          },
-          {
-            section: 'plugins',
-            displayName: `Update "${form.title}" form`,
-            uid: `form.update.${form.documentId}`,
-            pluginName: 'formflow',
-            subCategory: form.title,
-          },
-          {
-            section: 'plugins',
-            displayName: `Delete "${form.title}" form`,
-            uid: `form.delete.${form.documentId}`,
-            pluginName: 'formflow',
-            subCategory: form.title,
-          },
-        ];
-
-        await strapi.service('admin::permission').actionProvider.registerMany(perFormActions);
-      }
-    }
-  } catch (error) {
-    strapi.log.warn(
-      `[FormFlow] Failed to register per-form RBAC permission actions: ${
         error instanceof Error ? error.message : 'Unknown error'
       }`
     );

@@ -14,19 +14,6 @@ const protectedBy = (actions: string[]) => [
   },
 ];
 
-/**
- * Per-form RBAC enforcement entry, appended AFTER the global `protectedBy`
- * chain on form-scoped routes (those carrying `:id`/`:formId`). The global UID
- * check stays the first, authoritative gate; this policy adds per-form scoping
- * only when the Business `compliance.rbac` feature is entitled (pass-through
- * otherwise — see `policies/per-form-rbac.ts`). `action` is the `form.*` verb
- * this route maps to (read for GETs, update/delete for mutations).
- */
-const perForm = (action: 'read' | 'update' | 'delete') => ({
-  name: 'plugin::formflow.per-form-rbac',
-  config: { action },
-});
-
 export default {
   type: 'admin',
   routes: [
@@ -52,7 +39,7 @@ export default {
       path: '/forms/:id',
       handler: 'form.findOne',
       config: {
-        policies: [...protectedBy(['plugin::formflow.form.read']), perForm('read')],
+        policies: protectedBy(['plugin::formflow.form.read']),
       },
     },
     {
@@ -68,7 +55,7 @@ export default {
       path: '/forms/:id',
       handler: 'form.update',
       config: {
-        policies: [...protectedBy(['plugin::formflow.form.update']), perForm('update')],
+        policies: protectedBy(['plugin::formflow.form.update']),
       },
     },
     {
@@ -76,7 +63,7 @@ export default {
       path: '/forms/:id',
       handler: 'form.delete',
       config: {
-        policies: [...protectedBy(['plugin::formflow.form.delete']), perForm('delete')],
+        policies: protectedBy(['plugin::formflow.form.delete']),
       },
     },
     {
@@ -104,7 +91,7 @@ export default {
       path: '/forms/:formId/submissions',
       handler: 'submission.find',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.read']), perForm('read')],
+        policies: protectedBy(['plugin::formflow.submission.read']),
       },
     },
     {
@@ -112,7 +99,7 @@ export default {
       path: '/forms/:formId/submissions/stats',
       handler: 'submission.stats',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.read']), perForm('read')],
+        policies: protectedBy(['plugin::formflow.submission.read']),
       },
     },
     {
@@ -120,7 +107,7 @@ export default {
       path: '/forms/:formId/submissions/export',
       handler: 'submission.export',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.export']), perForm('read')],
+        policies: protectedBy(['plugin::formflow.submission.export']),
       },
     },
     {
@@ -132,7 +119,7 @@ export default {
       path: '/forms/:formId/submissions/bulk-delete',
       handler: 'submission.deleteMany',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.delete']), perForm('delete')],
+        policies: protectedBy(['plugin::formflow.submission.delete']),
       },
     },
     {
@@ -178,7 +165,7 @@ export default {
       path: '/forms/:formId/webhooks/test',
       handler: 'submission.testWebhook',
       config: {
-        policies: [...protectedBy(['plugin::formflow.form.update']), perForm('update')],
+        policies: protectedBy(['plugin::formflow.form.update']),
       },
     },
 
@@ -190,7 +177,7 @@ export default {
       path: '/forms/:formId/submissions/schedule-export',
       handler: 'submission.getScheduledExport',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.export']), perForm('read')],
+        policies: protectedBy(['plugin::formflow.submission.export']),
       },
     },
     {
@@ -198,7 +185,7 @@ export default {
       path: '/forms/:formId/submissions/schedule-export',
       handler: 'submission.createScheduledExport',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.export']), perForm('update')],
+        policies: protectedBy(['plugin::formflow.submission.export']),
       },
     },
     {
@@ -206,7 +193,7 @@ export default {
       path: '/forms/:formId/submissions/schedule-export',
       handler: 'submission.removeScheduledExport',
       config: {
-        policies: [...protectedBy(['plugin::formflow.submission.export']), perForm('update')],
+        policies: protectedBy(['plugin::formflow.submission.export']),
       },
     },
 
@@ -227,7 +214,7 @@ export default {
       path: '/forms/:formId/analytics',
       handler: 'license.analytics',
       config: {
-        policies: [...protectedBy(['plugin::formflow.form.read']), perForm('read')],
+        policies: protectedBy(['plugin::formflow.form.read']),
       },
     },
 

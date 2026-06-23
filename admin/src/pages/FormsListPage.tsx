@@ -35,19 +35,11 @@ import {
 
 import { useForms } from '../hooks';
 import { getTranslation } from '../utils/getTranslation';
-import {
-  FORM_PERMISSIONS,
-  SUBMISSION_PERMISSIONS,
-  buildPerFormPermissions,
-  PER_FORM_RBAC_FEATURE,
-} from '../permissions';
-import { useLicense } from '../ee/hooks/useLicense';
+import { FORM_PERMISSIONS, SUBMISSION_PERMISSIONS } from '../permissions';
 import type { Form, FormsQueryParams } from '../utils/api';
 
 interface FormRowProps {
   form: Form;
-  /** When true, update/delete are scoped to this form via per-form RBAC. */
-  isPerFormRbacActive: boolean;
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
@@ -60,17 +52,11 @@ interface FormRowProps {
 }
 
 /**
- * A single form table row.
- *
- * Extracted from the list so per-form RBAC can call `useRBAC` at a component's
- * top level (Rules of Hooks forbid calling it inside `.map`). When
- * `isPerFormRbacActive`, update/delete are gated by this form's per-document
- * permissions; otherwise the globally-derived flags are used. Creation and
- * submission-read stay global (no per-form scope for those).
+ * A single form table row. Update/delete are gated by the global form
+ * permissions; creation and submission-read are global too.
  */
 const FormRow = ({
   form,
-  isPerFormRbacActive,
   canCreate,
   canUpdate,
   canDelete,
@@ -83,14 +69,8 @@ const FormRow = ({
 }: FormRowProps) => {
   const { formatMessage } = useIntl();
 
-  // Always called (Rules of Hooks). The permissions passed are scoped to this
-  // form only when per-form RBAC is active; the result is otherwise ignored.
-  const {
-    allowedActions: { canUpdate: canUpdatePerForm, canDelete: canDeletePerForm },
-  } = useRBAC(buildPerFormPermissions(form.documentId));
-
-  const rowCanUpdate = isPerFormRbacActive ? canUpdatePerForm : canUpdate;
-  const rowCanDelete = isPerFormRbacActive ? canDeletePerForm : canDelete;
+  const rowCanUpdate = canUpdate;
+  const rowCanDelete = canDelete;
 
   return (
     <Tr
@@ -208,11 +188,6 @@ export const FormsListPage = () => {
   const {
     allowedActions: { canRead: canReadSubmissions },
   } = useRBAC(SUBMISSION_PERMISSIONS);
-
-  // Business tier: when entitled, row-level update/delete are scoped to per-form
-  // permissions (evaluated per row in <FormRow>). Defaults to false (global
-  // permissions) before the license resolves or in the free tier — UX only.
-  const isPerFormRbacActive = useLicense().can(PER_FORM_RBAC_FEATURE);
 
   // Delete confirmation state
   const [formToDelete, setFormToDelete] = useState<Form | null>(null);
@@ -401,7 +376,6 @@ export const FormsListPage = () => {
                 <FormRow
                   key={form.documentId}
                   form={form}
-                  isPerFormRbacActive={isPerFormRbacActive}
                   canCreate={canCreate}
                   canUpdate={canUpdate}
                   canDelete={canDelete}
