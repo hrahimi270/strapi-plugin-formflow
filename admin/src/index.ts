@@ -27,12 +27,18 @@ export default {
       },
     });
 
-    // GDPR Compliance (Business). The route is mounted under the plugin app
-    // shell; this is its visible entry point. Visibility is gated by the same
-    // plugin-access permission (form read) so it appears to roles that can use
-    // the plugin — the CompliancePage itself is license-aware and renders the
-    // Business upsell when the tier is not entitled (display-only gate; the
-    // server endpoints are the authoritative 402 gate).
+    // GDPR Compliance (Business). This is a menu-only link (no Component): the
+    // `compliance` route already lives inside the primary App mount registered
+    // above (its route path is `plugins/${PLUGIN_ID}/*`), so this link simply
+    // deep-links into that single mount. Registering a Component here would
+    // mount a second App at the `.../compliance` basename, whose index route is
+    // the Forms list — causing the menu link to render Forms and pushing the
+    // real page to the doubly-nested `.../compliance/compliance` URL.
+    // Visibility is gated by the same plugin-access permission (form read) so it
+    // appears to roles that can use the plugin — the CompliancePage itself is
+    // license-aware and renders the Business upsell when the tier is not
+    // entitled (display-only gate; the server endpoints are the authoritative
+    // 402 gate).
     app.addMenuLink({
       to: `plugins/${PLUGIN_ID}/compliance`,
       icon: Shield,
@@ -41,11 +47,6 @@ export default {
         defaultMessage: 'Compliance',
       },
       permissions: PERMISSIONS.main,
-      Component: async () => {
-        const { App } = await import('./pages/App');
-
-        return App;
-      },
     });
 
     app.registerPlugin({
