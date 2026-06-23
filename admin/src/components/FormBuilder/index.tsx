@@ -62,6 +62,10 @@ const createNewField = (type: string, order: number): FormField => {
     ];
   }
 
+  if (type === 'heading') {
+    baseField.attributes = { level: 'h2' };
+  }
+
   return baseField;
 };
 
