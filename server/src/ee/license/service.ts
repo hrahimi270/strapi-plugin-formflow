@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 
+import { randomUUID } from 'node:crypto';
+
 import type { Core } from '@strapi/strapi';
 
 import { FEATURE_TIER, TIER_RANK, type FeatureKey, type Tier } from '../feature-map';
@@ -9,6 +11,7 @@ const PLUGIN_CONFIG_ID = 'plugin::formflow';
 const STORE_PARAMS = { type: 'plugin', name: 'formflow' } as const;
 const CACHE_KEY = 'license-cache';
 const INSTANCE_ID_KEY = 'license-instance-id';
+const INSTANCE_NAME_KEY = 'license-instance-name';
 const DEFAULT_GRACE_DAYS = 14;
 const DAY_MS = 86_400_000;
 
@@ -104,6 +107,51 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
     return TIER_RANK[_tier] >= TIER_RANK[FEATURE_TIER[feature]];
   }
 
+  /**
+   * Resolve a STABLE instance name for this installation, persisting it on first
+   * use so every boot reuses the same activation binding instead of consuming a
+   * fresh activation slot. Never throws — falls back to a transient UUID if the
+   * store is unavailable.
+   */
+  async function resolveInstanceName(): Promise<string> {
+    try {
+      const existing = (await store().get({ key: INSTANCE_NAME_KEY })) as string | null;
+      if (existing) return existing;
+      const name = randomUUID();
+      await store().set({ key: INSTANCE_NAME_KEY, value: name });
+      return name;
+    } catch (error) {
+      strapi.log.warn('[FormFlow License] Failed to persist instance name:', error);
+      return randomUUID();
+    }
+  }
+
+  /**
+   * Activate the license key on first boot. A freshly purchased key is 'inactive'
+   * until activated; activation flips it to 'active' so the subsequent validate()
+   * resolves the tier. Idempotent: once we hold a persisted instance id we skip
+   * activation entirely. Never throws and never blocks — any failure (network,
+   * already-activated, activation-limit reached, parse error) falls through to
+   * validate(), which may still succeed if the key was activated previously.
+   */
+  async function ensureActivated(licenseKey: string): Promise<void> {
+    if (_instanceId) return;
+    try {
+      const result = await morClient.activate({
+        licenseKey,
+        instanceName: await resolveInstanceName(),
+        provider: readProvider(),
+      });
+      if (result) {
+        _instanceId = result.instanceId;
+        await store().set({ key: INSTANCE_ID_KEY, value: result.instanceId });
+        strapi.log.info('[FormFlow License] License key activated.');
+      }
+    } catch (error) {
+      strapi.log.warn('[FormFlow License] Activation attempt failed — proceeding to validate:', error);
+    }
+  }
+
   async function refresh(): Promise<void> {
     try {
       const licenseKey = readLicenseKey();
@@ -112,6 +160,10 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
         _state = 'free';
         return;
       }
+
+      // Ensure the key is activated before validating: an un-activated key reports
+      // status 'inactive' and would otherwise map to free.
+      await ensureActivated(licenseKey);
 
       const result = await morClient.validate({
         licenseKey,

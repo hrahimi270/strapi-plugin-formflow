@@ -34,6 +34,13 @@ const ENDPOINTS: Record<MorProvider, string> = {
  * Resolve the Bearer credential for a provider from the environment. Each MoR
  * authenticates with its own API token; this is the only place that knowledge
  * lives so swapping providers is one env var.
+ *
+ * The license endpoints (activate/validate/deactivate) are designed to be called
+ * from a customer's app with only their license key — they do NOT require the
+ * seller's store API key (verified empirically against Lemon Squeezy). So the
+ * token is optional: when unset we omit the Authorization header entirely rather
+ * than sending an empty `Bearer ` that some providers reject. The token is the
+ * SELLER's secret and end users must never need it.
  */
 function authToken(provider: MorProvider): string {
   switch (provider) {
@@ -106,14 +113,21 @@ async function morFetch(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), MOR_TIMEOUT_MS);
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  // Only attach the seller token when one is configured — license endpoints work
+  // for customers who supply only their license key (see authToken docblock).
+  const token = authToken(provider);
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${authToken(provider)}`,
-      },
+      headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
