@@ -328,9 +328,12 @@ export const FormSettings = ({
               </Field.Label>
               <SingleSelect
                 value={settings.layout || 'single'}
-                onChange={(value: string | number) =>
-                  updateSetting('layout', value as 'single' | 'multi-step')
-                }
+                onChange={(value: string | number) => {
+                  if (value === 'multi-step' && !multistepEntitled) {
+                    return;
+                  }
+                  updateSetting('layout', value as 'single' | 'multi-step');
+                }}
               >
                 <SingleSelectOption value="single">
                   {formatMessage({

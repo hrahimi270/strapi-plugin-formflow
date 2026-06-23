@@ -762,6 +762,7 @@ const SubmissionsView = ({
                   </SingleSelectOption>
                 ))}
               </SingleSelect>
+              <Field.Hint />
             </Field.Root>
 
             {canExport && (
