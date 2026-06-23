@@ -52,7 +52,6 @@ No extra database migration is needed — FormFlow creates its own content types
 | **Save & resume / partial submissions** | | ✅ | ✅ |
 | **White-label / remove branding** (custom CSS) | | ✅ | ✅ |
 | **GDPR/compliance** (auto-retention purge, anonymization, consent fields, per-subject export/delete, audit log) | | | ✅ |
-| **RBAC per form** | | | ✅ |
 | **Approval workflows** | | | ✅ |
 | **Multi-language forms** | | | ✅ |
 | **Priority support / SLA** | | | ✅ |
@@ -93,7 +92,7 @@ Purchase a license at: **[https://lemon.squeezy.com/formflow](https://lemon.sque
 |---|---|---|---|
 | Free | $0 | — | Core form builder, submission inbox, CSV/JSON export, spam basics, 1 email notification |
 | Pro | ~$99–149 / project / year | Annual | All Free features + advanced field types, conditional logic, multi-step forms, advanced email (autoresponder, custom templates, multiple notifications), webhooks, pre-built integrations, advanced spam, analytics dashboard, advanced export (Excel/PDF/scheduled), save & resume, white-label/custom CSS |
-| Business | ~$399–699 / year | Annual | All Pro features + GDPR/compliance (auto-retention purge, IP anonymization, consent fields, per-subject export/delete, audit log), RBAC per form, approval workflows, multi-language forms, priority support & SLA |
+| Business | ~$399–699 / year | Annual | All Pro features + GDPR/compliance (auto-retention purge, IP anonymization, consent fields, per-subject export/delete, audit log), approval workflows, multi-language forms, priority support & SLA |
 
 **Billing model:**
 - Per-project annual billing. No per-seat pricing, no submission-volume metering.
