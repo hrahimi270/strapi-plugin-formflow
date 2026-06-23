@@ -30,6 +30,13 @@ interface FormWithRateLimit {
 
 /**
  * Policy context interface for rate limit policy
+ *
+ * Note: at runtime this is Object.assign({ is, type }, koa-ctx). Only the koa
+ * ctx's OWN properties survive that copy — the convenience methods `set`/`throw`
+ * live on the koa context PROTOTYPE and are NOT present here. The koa `response`
+ * object IS an own property, so headers are set via `response.set`. To signal
+ * HTTP 429 we throw a RateLimitHttpError carrying `status: 429` (mapped to 429 by
+ * Strapi's error middleware via http-errors), not a non-existent `policyContext.throw`.
  */
 export interface RateLimitPolicyContext {
   params: Record<string, string>;
@@ -37,8 +44,32 @@ export interface RateLimitPolicyContext {
     ip: string;
     headers: Record<string, string | string[] | undefined>;
   };
-  status: number;
-  body: unknown;
+  /** Koa response object (own property) — used to set the Retry-After header */
+  response: {
+    set(header: string, value: string): void;
+  };
+}
+
+/**
+ * HTTP error thrown when a form's rate limit is exceeded. It carries an explicit
+ * `status: 429` + `expose: true`; Strapi's error middleware routes unknown error
+ * instances through `formatInternalError` → http-errors `createError(err)`, which
+ * preserves the pre-set status, yielding a correct HTTP 429. We use a LOCAL class
+ * (not `@strapi/utils`' RateLimitError) because the plugin bundle ships its own
+ * copy of `@strapi/utils`, so a bundled `RateLimitError` fails core's
+ * `instanceof ApplicationError` check and falls through to a generic HTTP 500.
+ */
+class RateLimitHttpError extends Error {
+  status = 429;
+
+  statusCode = 429;
+
+  expose = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
 }
 
 /**
@@ -211,26 +242,26 @@ const rateLimitPolicy = async (
           `Count: ${record.count}/${maxSubmissions}, retry after: ${retryAfterSeconds}s`
       );
 
-      // Set response status and body
-      policyContext.status = 429;
-      policyContext.body = {
-        error: {
-          status: 429,
-          name: 'TooManyRequestsError',
-          message: 'Too many submissions. Please try again later.',
-          details: {
-            retryAfter: retryAfterSeconds,
-          },
-        },
-      };
+      // Set Retry-After so clients know when to retry. `response` is an own
+      // property of the koa ctx, so `response.set` survives createPolicyContext
+      // (unlike the prototype `ctx.set`, which is dropped by Object.assign).
+      policyContext.response.set('Retry-After', String(retryAfterSeconds));
 
-      return false;
+      // Throw a 429-carrying error — Strapi maps it to HTTP 429 via
+      // formatInternalError + http-errors (which preserves the pre-set status).
+      // Returning false would emit a generic 403 PolicyError; the earlier
+      // `policyContext.throw(429,...)` silently failed because `throw` is a koa
+      // prototype method absent from the Object.assign-built policy context.
+      throw new RateLimitHttpError('Too many submissions. Please try again later.');
     }
 
     return true;
   } catch (error) {
-    // Log error but allow request (fail open)
-    // This ensures the form remains usable even if rate limiting breaks
+    // Re-throw the intentional rate-limit rejection so it surfaces as HTTP 429;
+    // only UNEXPECTED errors fail open (so a broken limiter never blocks forms).
+    if (error instanceof RateLimitHttpError) {
+      throw error;
+    }
     strapi.log.error('[FormFlow] rate-limit policy error:', error);
     return true;
   }
