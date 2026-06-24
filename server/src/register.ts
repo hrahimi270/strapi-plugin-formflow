@@ -5,7 +5,7 @@ import type { Core } from '@strapi/strapi';
  *
  * Registered with the admin permission `actionProvider`, which computes each
  * action UID as `plugin::<pluginName>.<uid>` — so these become
- * `plugin::strapi-forms.form.read`, `plugin::strapi-forms.submission.export`,
+ * `plugin::formflow.form.read`, `plugin::formflow.submission.export`,
  * etc. `section: 'plugins'` groups them under the "Forms" entry in
  * Settings → Roles → (role) → Plugins. These UIDs MUST stay in sync with the
  * route policies in `routes/admin/index.ts` and the admin permission constants
@@ -16,49 +16,49 @@ export const RBAC_ACTIONS = [
     section: 'plugins',
     displayName: 'Read forms',
     uid: 'form.read',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Create forms',
     uid: 'form.create',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Update forms',
     uid: 'form.update',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Delete forms',
     uid: 'form.delete',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Read submissions',
     uid: 'submission.read',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Update submissions',
     uid: 'submission.update',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Delete submissions',
     uid: 'submission.delete',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
   {
     section: 'plugins',
     displayName: 'Export submissions',
     uid: 'submission.export',
-    pluginName: 'strapi-forms',
+    pluginName: 'formflow',
   },
 ];
 
@@ -67,9 +67,9 @@ export const RBAC_ACTIONS = [
  *
  * Note the plugin prefix: Strapi mounts plugin content-api routes under
  * `{api.rest.prefix}/{pluginName}`, so the live paths are
- * `/api/strapi-forms/...`. The `/api` prefix is already part of the generated
+ * `/api/formflow/...`. The `/api` prefix is already part of the generated
  * spec's `servers[].url`, so the path keys below are written WITHOUT `/api`
- * but WITH the `strapi-forms` plugin segment.
+ * but WITH the `formflow` plugin segment.
  *
  * These three paths are declared explicitly because the documentation plugin's
  * auto-scanner is content-type-name driven and would mis-type the slug param
@@ -79,17 +79,17 @@ export const RBAC_ACTIONS = [
 const PUBLIC_API_OVERRIDE = {
   tags: [
     {
-      name: 'Strapi Forms (Public)',
+      name: 'FormFlow (Public)',
       description: 'Public, headless endpoints for retrieving form schemas and submitting forms.',
     },
   ],
   paths: {
-    '/strapi-forms': {
+    '/formflow': {
       get: {
-        tags: ['Strapi Forms (Public)'],
+        tags: ['FormFlow (Public)'],
         summary: 'Plugin index / health check',
         description: 'Returns a simple welcome payload confirming the plugin is mounted.',
-        operationId: 'strapiFormsIndex',
+        operationId: 'formflowIndex',
         responses: {
           '200': {
             description: 'Plugin is available.',
@@ -97,9 +97,9 @@ const PUBLIC_API_OVERRIDE = {
         },
       },
     },
-    '/strapi-forms/forms/{slug}': {
+    '/formflow/forms/{slug}': {
       get: {
-        tags: ['Strapi Forms (Public)'],
+        tags: ['FormFlow (Public)'],
         summary: "Get a form's public schema by slug",
         description:
           'Returns the sanitized, public-safe schema (fields, settings) for an active form. Sensitive settings (e.g. reCAPTCHA secret) are never exposed.',
@@ -128,9 +128,9 @@ const PUBLIC_API_OVERRIDE = {
         },
       },
     },
-    '/strapi-forms/forms/{slug}/submit': {
+    '/formflow/forms/{slug}/submit': {
       post: {
-        tags: ['Strapi Forms (Public)'],
+        tags: ['FormFlow (Public)'],
         summary: 'Submit a form',
         description:
           'Submits values for the form identified by slug. The request body is an arbitrary map of the form field names to their submitted values.',
@@ -249,7 +249,7 @@ const register = async ({ strapi }: { strapi: Core.Strapi }) => {
     await strapi.service('admin::permission').actionProvider.registerMany(RBAC_ACTIONS);
   } catch (error) {
     strapi.log.warn(
-      `[Strapi Forms] Failed to register RBAC permission actions: ${
+      `[FormFlow] Failed to register RBAC permission actions: ${
         error instanceof Error ? error.message : 'Unknown error'
       }`
     );
@@ -273,15 +273,15 @@ const register = async ({ strapi }: { strapi: Core.Strapi }) => {
     }
 
     overrideService.registerOverride(PUBLIC_API_OVERRIDE, {
-      // Only applied when the host has opted strapi-forms into documentation.
-      pluginOrigin: 'strapi-forms',
+      // Only applied when the host has opted formflow into documentation.
+      pluginOrigin: 'formflow',
       // Suppress the unreliable auto-scanner for this plugin so it doesn't emit
       // mis-typed/duplicate paths alongside our explicit override.
-      excludeFromGeneration: ['strapi-forms'],
+      excludeFromGeneration: ['formflow'],
     });
   } catch (error) {
     strapi.log.warn(
-      `[Strapi Forms] Failed to register documentation override: ${
+      `[FormFlow] Failed to register documentation override: ${
         error instanceof Error ? error.message : 'Unknown error'
       }`
     );

@@ -33,13 +33,17 @@ import { FormBuilder } from '../components/FormBuilder';
 import { FormSettings } from '../components/FormSettings';
 import { EmailSettings } from '../components/FormSettings/EmailSettings';
 import { WebhookSettings } from '../components/FormSettings/WebhookSettings';
+import { IntegrationsSettings } from '../components/FormSettings/IntegrationsSettings';
+import { LocalesEditor } from '../components/FormSettings/LocalesEditor';
 import { PLUGIN_ID } from '../pluginId';
 import type {
   FormField,
   FormSettings as FormSettingsType,
   FormPayload,
+  FormLocales,
   EmailNotification,
   WebhookConfig,
+  IntegrationConfig,
 } from '../utils/api';
 
 /**
@@ -52,6 +56,7 @@ const getDefaultSettings = (): Partial<FormSettingsType> => ({
   layout: 'single',
   emailNotifications: [],
   webhooks: [],
+  integrations: [],
   spam: {
     honeypot: true,
     honeypotFieldName: '_gotcha',
@@ -70,6 +75,10 @@ interface FormData {
   successMessage: string;
   redirectUrl: string;
   isActive: boolean;
+  /** Approval workflow (Business). Top-level form field, round-trips via the save path. */
+  requiresApproval: boolean;
+  /** Multi-language overrides (Business). Round-trips via the form save path. */
+  locales: FormLocales;
 }
 
 /**
@@ -89,6 +98,8 @@ const getEmptyFormData = (): FormData => ({
   successMessage: 'Thank you for your submission!',
   redirectUrl: '',
   isActive: true,
+  requiresApproval: false,
+  locales: {},
 });
 
 /**
@@ -180,8 +191,10 @@ export const FormEditPage = () => {
 
   const { form, isLoading, isSaving, error, createForm, updateForm } = useForm(documentId);
 
-  // Saving maps to create (new form) or update (existing form). The relevant
-  // route is also protected server-side; this just keeps the UI honest.
+  // Saving maps to create (new form) or update (existing form). Gated by the
+  // global `form.create`/`form.update` actions — the editor must never lock out
+  // an authorized user (super-admins always hold these). The route remains the
+  // authoritative source of truth.
   const {
     isLoading: isLoadingRBAC,
     allowedActions: { canCreate, canUpdate },
@@ -213,6 +226,8 @@ export const FormEditPage = () => {
         successMessage: form.successMessage || 'Thank you for your submission!',
         redirectUrl: form.redirectUrl || '',
         isActive: form.isActive ?? true,
+        requiresApproval: form.requiresApproval ?? false,
+        locales: form.locales || {},
       });
       setHasChanges(false);
     }
@@ -296,6 +311,8 @@ export const FormEditPage = () => {
         successMessage: formData.successMessage,
         redirectUrl: formData.redirectUrl || undefined,
         isActive: formData.isActive,
+        requiresApproval: formData.requiresApproval,
+        locales: formData.locales,
       };
 
       if (isCreating) {
@@ -429,6 +446,18 @@ export const FormEditPage = () => {
               {formatMessage({
                 id: getTranslation('form.tabs.notifications'),
                 defaultMessage: 'Notifications',
+              })}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="integrations">
+              {formatMessage({
+                id: getTranslation('form.tabs.integrations'),
+                defaultMessage: 'Integrations',
+              })}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="translations">
+              {formatMessage({
+                id: getTranslation('form.tabs.translations'),
+                defaultMessage: 'Translations',
               })}
             </Tabs.Trigger>
           </Tabs.List>
@@ -592,12 +621,14 @@ export const FormEditPage = () => {
                 successMessage={formData.successMessage}
                 redirectUrl={formData.redirectUrl}
                 showResetButton={formData.settings.showResetButton ?? false}
+                requiresApproval={formData.requiresApproval}
                 onSettingsChange={(settings) => updateField('settings', settings)}
                 onSuccessMessageChange={(value) => updateField('successMessage', value)}
                 onRedirectUrlChange={(value) => updateField('redirectUrl', value)}
                 onShowResetButtonChange={(value) =>
                   updateField('settings', { ...formData.settings, showResetButton: value })
                 }
+                onRequiresApprovalChange={(value) => updateField('requiresApproval', value)}
               />
             </Tabs.Content>
 
@@ -610,6 +641,7 @@ export const FormEditPage = () => {
                     onChange={(emailNotifications: EmailNotification[]) =>
                       updateField('settings', { ...formData.settings, emailNotifications })
                     }
+                    formFields={formData.fields}
                   />
                 </Box>
 
@@ -619,9 +651,33 @@ export const FormEditPage = () => {
                     onChange={(webhooks: WebhookConfig[]) =>
                       updateField('settings', { ...formData.settings, webhooks })
                     }
+                    formId={form?.documentId ?? ''}
                   />
                 </Box>
               </Flex>
+            </Tabs.Content>
+
+            {/* Integrations Tab */}
+            <Tabs.Content value="integrations">
+              <Box padding={6} background="neutral0" hasRadius shadow="tableShadow">
+                <IntegrationsSettings
+                  integrations={formData.settings.integrations || []}
+                  onChange={(integrations: IntegrationConfig[]) =>
+                    updateField('settings', { ...formData.settings, integrations })
+                  }
+                />
+              </Box>
+            </Tabs.Content>
+
+            {/* Translations (locales) Tab */}
+            <Tabs.Content value="translations">
+              <Box padding={6} background="neutral0" hasRadius shadow="tableShadow">
+                <LocalesEditor
+                  fields={formData.fields}
+                  locales={formData.locales}
+                  onChange={(locales: FormLocales) => updateField('locales', locales)}
+                />
+              </Box>
             </Tabs.Content>
           </Box>
         </Tabs.Root>

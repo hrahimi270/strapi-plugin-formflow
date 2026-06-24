@@ -21,7 +21,7 @@ export interface UseSubmissionReturn {
 /**
  * Hook for managing a single submission (detail view).
  *
- * Fetches the submission via GET /strapi-forms/submissions/:id, updates its
+ * Fetches the submission via GET /formflow/submissions/:id, updates its
  * status via PUT, and deletes it via DELETE. Replaces the inline fetch logic
  * previously living in the submission detail page.
  */

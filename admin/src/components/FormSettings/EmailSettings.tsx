@@ -10,6 +10,8 @@ import {
   Checkbox,
   IconButton,
   Divider,
+  SingleSelect,
+  SingleSelectOption,
 } from '@strapi/design-system';
 import { Plus, Trash } from '@strapi/icons';
 import { useIntl } from 'react-intl';
@@ -17,10 +19,17 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { getTranslation } from '../../utils/getTranslation';
 import { EmailNotification } from '../../utils/api';
+import { useLicense } from '../../ee/hooks/useLicense';
+import { GatedButton } from '../../ee/components/GatedButton';
+import { LockedSection } from '../../ee/components/LockedSection';
+import { ProBadge } from '../../ee/components/ProBadge';
 
 export interface EmailSettingsProps {
   notifications: EmailNotification[];
   onChange: (notifications: EmailNotification[]) => void;
+  /** The form's current fields, used to populate the autoresponder "Submitter
+   *  email field" selector. Only email-type fields are offered. */
+  formFields?: Array<{ name: string; label: string; type: string }>;
 }
 
 /**
@@ -74,8 +83,19 @@ const isValidEmail = (email: string): boolean => {
 /**
  * EmailSettings component for configuring email notifications
  */
-export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) => {
+export const EmailSettings = ({ notifications, onChange, formFields = [] }: EmailSettingsProps) => {
   const { formatMessage } = useIntl();
+  const { can } = useLicense();
+  const emailAdvanced = can('email.advanced');
+  const emailTemplate = can('email.customTemplate');
+  const emailAutoresponder = can('email.autoresponder');
+  const emailWhiteLabel = can('email.whiteLabel');
+
+  // The email-type fields that can supply the submitter's address.
+  const emailFields = useMemo(
+    () => formFields.filter((field) => field.type === 'email'),
+    [formFields]
+  );
   // Validation errors keyed by the notification's stable id (never by array index).
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
@@ -285,12 +305,27 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
             </Typography>
           </Box>
         </Box>
-        <Button size="S" startIcon={<Plus />} onClick={addNotification}>
-          {formatMessage({
-            id: getTranslation('notifications.email.add'),
-            defaultMessage: 'Add email notification',
-          })}
-        </Button>
+        {items.length === 0 ? (
+          <Button size="S" startIcon={<Plus />} onClick={addNotification}>
+            {formatMessage({
+              id: getTranslation('notifications.email.add'),
+              defaultMessage: 'Add email notification',
+            })}
+          </Button>
+        ) : (
+          <GatedButton
+            can={emailAdvanced}
+            feature="email.advanced"
+            size="S"
+            startIcon={<Plus />}
+            onClick={addNotification}
+          >
+            {formatMessage({
+              id: getTranslation('notifications.email.add'),
+              defaultMessage: 'Add email notification',
+            })}
+          </GatedButton>
+        )}
       </Flex>
 
       {/* Empty State */}
@@ -361,8 +396,29 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
               </Flex>
 
               <Flex direction="column" gap={4} alignItems="stretch">
-                {/* Recipients: To / Cc / Bcc */}
-                {renderRecipientEditor(notification, index, 'to')}
+                {/* Recipients: To / Cc / Bcc. When the notification is an
+                    autoresponder, the static `to` list is overridden at runtime
+                    by the submitter's email, so it is dimmed and read-only. */}
+                {notification.isAutoresponder ? (
+                  <Box>
+                    <Box style={{ pointerEvents: 'none', opacity: 0.6 }} aria-disabled>
+                      {renderRecipientEditor(notification, index, 'to')}
+                    </Box>
+                    <Box paddingTop={1}>
+                      <Typography variant="pi" textColor="neutral500">
+                        {formatMessage({
+                          id: getTranslation(
+                            'notifications.email.autoresponder.staticRecipientsHint'
+                          ),
+                          defaultMessage:
+                            "Static recipients are overridden by the submitter's email when autoresponder is active.",
+                        })}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  renderRecipientEditor(notification, index, 'to')
+                )}
                 {renderRecipientEditor(notification, index, 'cc')}
                 {renderRecipientEditor(notification, index, 'bcc')}
 
@@ -399,65 +455,155 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                   </Box>
 
                   <Box flex="1">
-                    <Field.Root
-                      name={`notification-${notifId}-replyTo`}
-                      error={validationErrors[`${notifId}-replyTo`] || false}
-                      hint={formatMessage({
-                        id: getTranslation('notifications.email.replyTo.hint'),
-                        defaultMessage: "Use {{field.email}} for the submitter's email",
-                      })}
+                    <LockedSection
+                      can={emailTemplate}
+                      feature="email.customTemplate"
+                      mode="readonly"
                     >
-                      <Field.Label>
-                        {formatMessage({
-                          id: getTranslation('notifications.email.replyTo.label'),
-                          defaultMessage: 'Reply-To',
+                      <Field.Root
+                        name={`notification-${notifId}-replyTo`}
+                        error={validationErrors[`${notifId}-replyTo`] || false}
+                        hint={formatMessage({
+                          id: getTranslation('notifications.email.replyTo.hint'),
+                          defaultMessage: "Use {{field.email}} for the submitter's email",
                         })}
-                      </Field.Label>
-                      <TextInput
-                        value={notification.replyTo || ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          handleReplyToChange(notifId, index, e.target.value)
-                        }
-                        placeholder="{{field.email}}"
-                      />
-                      <Field.Hint />
-                      <Field.Error />
-                    </Field.Root>
+                      >
+                        <Field.Label>
+                          {formatMessage({
+                            id: getTranslation('notifications.email.replyTo.label'),
+                            defaultMessage: 'Reply-To',
+                          })}
+                          {!emailTemplate && (
+                            <>
+                              {' '}
+                              <ProBadge tier="pro" />
+                            </>
+                          )}
+                        </Field.Label>
+                        <TextInput
+                          value={notification.replyTo || ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            handleReplyToChange(notifId, index, e.target.value)
+                          }
+                          placeholder="{{field.email}}"
+                        />
+                        <Field.Hint />
+                        <Field.Error />
+                      </Field.Root>
+                    </LockedSection>
                   </Box>
                 </Flex>
 
                 <Divider />
 
+                {/* Autoresponder (Pro): send to the submitter's email field */}
+                <Box>
+                  <LockedSection
+                    can={emailAutoresponder}
+                    feature="email.autoresponder"
+                    mode="readonly"
+                  >
+                    <Flex direction="column" gap={3} alignItems="stretch">
+                      <Checkbox
+                        checked={!!notification.isAutoresponder}
+                        onCheckedChange={(checked: boolean) =>
+                          updateNotification(index, 'isAutoresponder', checked)
+                        }
+                      >
+                        {formatMessage({
+                          id: getTranslation('notifications.email.autoresponder.label'),
+                          defaultMessage: 'Send to submitter (autoresponder)',
+                        })}
+                        {!emailAutoresponder && (
+                          <>
+                            {' '}
+                            <ProBadge tier="pro" />
+                          </>
+                        )}
+                      </Checkbox>
+
+                      {notification.isAutoresponder && (
+                        <Field.Root
+                          name={`notification-${notifId}-toField`}
+                          hint={formatMessage({
+                            id: getTranslation('notifications.email.toField.hint'),
+                            defaultMessage:
+                              'Leave blank to use the first email-type field found in the submission.',
+                          })}
+                        >
+                          <Field.Label>
+                            {formatMessage({
+                              id: getTranslation('notifications.email.toField.label'),
+                              defaultMessage: 'Submitter email field',
+                            })}
+                          </Field.Label>
+                          <SingleSelect
+                            value={notification.toField ?? ''}
+                            onChange={(value: string | number) =>
+                              updateNotification(index, 'toField', String(value) || undefined)
+                            }
+                            placeholder={formatMessage({
+                              id: getTranslation('notifications.email.toField.placeholder'),
+                              defaultMessage: 'Select a field (optional)',
+                            })}
+                          >
+                            {emailFields.map((field) => (
+                              <SingleSelectOption key={field.name} value={field.name}>
+                                {field.label || field.name}
+                              </SingleSelectOption>
+                            ))}
+                          </SingleSelect>
+                          <Field.Hint />
+                        </Field.Root>
+                      )}
+                    </Flex>
+                  </LockedSection>
+                </Box>
+
+                <Divider />
+
                 {/* Custom email body template (optional) */}
                 <Box>
-                  <Field.Root
-                    name={`notification-${notifId}-template`}
-                    hint={formatMessage({
-                      id: getTranslation('notifications.email.template.hint'),
-                      defaultMessage:
-                        'Optional. Custom email body with {{form.title}}, {{form.slug}}, {{submission.id}}, {{submission.createdAt}}, {{data.fieldName}} for a single field, and {{data}} for all fields. Leave empty to use the default formatted email. HTML is allowed; submitted values are escaped automatically.',
-                    })}
+                  <LockedSection
+                    can={emailTemplate}
+                    feature="email.customTemplate"
+                    mode="readonly"
                   >
-                    <Field.Label>
-                      {formatMessage({
-                        id: getTranslation('notifications.email.template.label'),
-                        defaultMessage: 'Email template',
-                      })}
-                    </Field.Label>
-                    <Textarea
-                      rows={6}
-                      value={notification.template || ''}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        updateNotification(index, 'template', e.target.value || undefined)
-                      }
-                      placeholder={formatMessage({
-                        id: getTranslation('notifications.email.template.placeholder'),
+                    <Field.Root
+                      name={`notification-${notifId}-template`}
+                      hint={formatMessage({
+                        id: getTranslation('notifications.email.template.hint'),
                         defaultMessage:
-                          'New submission for {{form.title}}\n\n{{data}}',
+                          'Optional. Custom email body with {{form.title}}, {{form.slug}}, {{submission.id}}, {{submission.createdAt}}, {{data.fieldName}} for a single field, and {{data}} for all fields. Leave empty to use the default formatted email. HTML is allowed; submitted values are escaped automatically.',
                       })}
-                    />
-                    <Field.Hint />
-                  </Field.Root>
+                    >
+                      <Field.Label>
+                        {formatMessage({
+                          id: getTranslation('notifications.email.template.label'),
+                          defaultMessage: 'Email template',
+                        })}
+                        {!emailTemplate && (
+                          <>
+                            {' '}
+                            <ProBadge tier="pro" />
+                          </>
+                        )}
+                      </Field.Label>
+                      <Textarea
+                        rows={6}
+                        value={notification.template || ''}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          updateNotification(index, 'template', e.target.value || undefined)
+                        }
+                        placeholder={formatMessage({
+                          id: getTranslation('notifications.email.template.placeholder'),
+                          defaultMessage:
+                            'New submission for {{form.title}}\n\n{{data}}',
+                        })}
+                      />
+                      <Field.Hint />
+                    </Field.Root>
+                  </LockedSection>
                 </Box>
 
                 <Divider />
@@ -474,6 +620,41 @@ export const EmailSettings = ({ notifications, onChange }: EmailSettingsProps) =
                     defaultMessage: 'Include submission data',
                   })}
                 </Checkbox>
+
+                {/* White-label (Pro): omit the FormFlow branding footer */}
+                <LockedSection
+                  can={emailWhiteLabel}
+                  feature="email.whiteLabel"
+                  mode="readonly"
+                >
+                  <Field.Root
+                    name={`notification-${notifId}-omitBranding`}
+                    hint={formatMessage({
+                      id: getTranslation('notifications.email.whiteLabel.hint'),
+                      defaultMessage:
+                        "Omit the 'Sent by FormFlow' line from the email footer (Pro feature).",
+                    })}
+                  >
+                    <Checkbox
+                      checked={!!notification.omitBranding}
+                      onCheckedChange={(checked: boolean) =>
+                        updateNotification(index, 'omitBranding', checked)
+                      }
+                    >
+                      {formatMessage({
+                        id: getTranslation('notifications.email.whiteLabel.label'),
+                        defaultMessage: 'Remove branding footer',
+                      })}
+                      {!emailWhiteLabel && (
+                        <>
+                          {' '}
+                          <ProBadge tier="pro" />
+                        </>
+                      )}
+                    </Checkbox>
+                    <Field.Hint />
+                  </Field.Root>
+                </LockedSection>
               </Flex>
             </Box>
             );

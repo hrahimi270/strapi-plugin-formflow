@@ -1,7 +1,7 @@
 import { PLUGIN_ID } from '../pluginId';
 
 /**
- * API endpoint builders for the strapi-forms plugin
+ * API endpoint builders for the formflow plugin
  */
 export const API = {
   // Forms
@@ -14,16 +14,34 @@ export const API = {
   submissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions`,
   submissionStats: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions/stats`,
   submission: (id: string) => `/${PLUGIN_ID}/submissions/${id}`,
+  // Approval workflow transition (Business). Server gates with a 402 when unentitled.
+  approveSubmission: (id: string) => `/${PLUGIN_ID}/submissions/${id}/approve`,
   // Batch delete is a POST (Koa does not parse a DELETE request body), so the
   // ids travel in the JSON body of POST /forms/:formId/submissions/bulk-delete.
   bulkDeleteSubmissions: (formId: string) =>
     `/${PLUGIN_ID}/forms/${formId}/submissions/bulk-delete`,
   // NOTE: the export endpoint is nested under the submissions collection on the server
-  // (GET /strapi-forms/forms/:formId/submissions/export).
+  // (GET /formflow/forms/:formId/submissions/export).
   exportSubmissions: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/submissions/export`,
+  // Scheduled-export CRUD (Pro). GET reads, POST saves, DELETE clears.
+  scheduleExport: (formId: string) =>
+    `/${PLUGIN_ID}/forms/${formId}/submissions/schedule-export`,
+
+  // Webhooks
+  testWebhook: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/webhooks/test`,
+
+  // Analytics (Pro). Server gates with a 402 when unentitled.
+  formAnalytics: (formId: string) => `/${PLUGIN_ID}/forms/${formId}/analytics`,
 
   // Field Types
   fieldTypes: `/${PLUGIN_ID}/field-types`,
+
+  // Save & resume (Pro). These are PUBLIC content-api endpoints (under /api/),
+  // not plugin admin routes, so they intentionally do not use PLUGIN_ID. The
+  // server gates them with a 402 when the license is not entitled.
+  savePartialForm: (slug: string) => `/api/forms/${slug}/partial`,
+  getPartialForm: (slug: string, resumeToken: string) =>
+    `/api/forms/${slug}/partial/${resumeToken}`,
 } as const;
 
 /**
@@ -79,6 +97,13 @@ export interface RawRequestOptions {
   body?: unknown;
   accept?: string;
   signal?: AbortSignal;
+  /**
+   * Read the response body as a Blob instead of text. Required for binary
+   * exports (xlsx/pdf) where reading via `response.text()` would corrupt the
+   * bytes. When set, {@link RawRequestResult.blob} is populated and `text` is
+   * empty for a successful response.
+   */
+  responseType?: 'text' | 'blob';
 }
 
 /**
@@ -88,6 +113,7 @@ export interface RawRequestResult {
   ok: boolean;
   status: number;
   text: string;
+  blob?: Blob;
 }
 
 /**
@@ -148,9 +174,12 @@ export const rawRequest = async (
   }
 
   const response = await fetch(withBackendUrl(url), init);
-  const text = await response.text();
 
   if (!response.ok) {
+    // On error always read the body as text — the server returns a JSON/text
+    // error payload (e.g. the 402 upsell) regardless of the requested format.
+    const text = await response.text();
+
     // A 401 here means the locally-read token expired; this raw path cannot
     // refresh/retry the way `useFetchClient` does, so steer the user to the
     // one action that reissues a valid token: reloading the page.
@@ -164,11 +193,18 @@ export const rawRequest = async (
     );
   }
 
+  // Binary exports (xlsx/pdf) must be read as a Blob so the bytes are preserved.
+  if (options.responseType === 'blob') {
+    const blob = await response.blob();
+    return { ok: response.ok, status: response.status, text: '', blob };
+  }
+
+  const text = await response.text();
   return { ok: response.ok, status: response.status, text };
 };
 
 /**
- * All supported form field type names (18 total).
+ * All supported form field type names (25 total).
  * Mirrors the server `getFieldTypes()` registry.
  */
 export type FieldTypeName =
@@ -192,6 +228,13 @@ export type FieldTypeName =
   // advanced
   | 'file'
   | 'hidden'
+  | 'signature'
+  | 'rating'
+  | 'address'
+  | 'richtext'
+  | 'calculated'
+  | 'payment'
+  | 'consent'
   // layout
   | 'heading'
   | 'paragraph'
@@ -266,6 +309,35 @@ export interface FormStep {
 }
 
 /**
+ * Per-locale content overrides for a single field (Business multi-language).
+ * Only UI content is localized — label, placeholder, description and option
+ * labels — never field types, names, validation or conditional logic. Mirrors
+ * the server's `FieldLocaleOverride` shape consumed by `getPublicSchema`.
+ */
+export interface FieldLocaleOverride {
+  label?: string;
+  placeholder?: string;
+  description?: string;
+  options?: FieldOption[];
+}
+
+/**
+ * One locale's content overrides for a form: a map of fieldId -> override plus
+ * an optional localized success message. Mirrors the server's `FormLocaleContent`.
+ */
+export interface FormLocaleContent {
+  fields?: Record<string, FieldLocaleOverride>;
+  successMessage?: string;
+}
+
+/**
+ * The `locales` JSON map on a form: locale code -> per-locale content. This is
+ * the plugin's own translation map (independent of host i18n); the public
+ * schema applies a single locale's overrides when `?locale=` is requested.
+ */
+export type FormLocales = Record<string, FormLocaleContent>;
+
+/**
  * Email notification configuration
  */
 export interface EmailNotification {
@@ -285,6 +357,13 @@ export interface EmailNotification {
    * default auto-generated body is used.
    */
   template?: string;
+  /** Pro: when true, `to` is resolved at runtime from the submitter's email field. */
+  isAutoresponder?: boolean;
+  /** Pro: the form field name that supplies the submitter's email. Defaults to
+   *  the first email-type field in the form when omitted. */
+  toField?: string;
+  /** Pro: when true, the "Sent by FormFlow" footer is omitted from the email. */
+  omitBranding?: boolean;
 }
 
 /**
@@ -307,6 +386,63 @@ export interface WebhookConfig {
 }
 
 /**
+ * Pre-built integration configurations (Pro). Each is a discriminated union
+ * member keyed by `type`, mirroring the server-side types in
+ * `server/src/ee/integrations/index.ts`. Stored verbatim in
+ * `FormSettings.integrations`.
+ */
+export interface SlackIntegrationConfig {
+  type: 'slack';
+  enabled: boolean;
+  webhookUrl: string;
+  includeData?: boolean;
+}
+export interface GoogleSheetsIntegrationConfig {
+  type: 'google_sheets';
+  enabled: boolean;
+  deploymentId: string;
+  sheetId?: string;
+}
+export interface MailchimpIntegrationConfig {
+  type: 'mailchimp';
+  enabled: boolean;
+  apiKey: string;
+  serverPrefix: string;
+  listId: string;
+  emailField: string;
+}
+export interface HubSpotIntegrationConfig {
+  type: 'hubspot';
+  enabled: boolean;
+  portalId: string;
+  formGuid: string;
+}
+export interface NotionIntegrationConfig {
+  type: 'notion';
+  enabled: boolean;
+  integrationToken: string;
+  databaseId: string;
+}
+export interface ZapierIntegrationConfig {
+  type: 'zapier';
+  enabled: boolean;
+  webhookUrl: string;
+}
+export interface MakeIntegrationConfig {
+  type: 'make';
+  enabled: boolean;
+  webhookUrl: string;
+}
+export type IntegrationConfig =
+  | SlackIntegrationConfig
+  | GoogleSheetsIntegrationConfig
+  | MailchimpIntegrationConfig
+  | HubSpotIntegrationConfig
+  | NotionIntegrationConfig
+  | ZapierIntegrationConfig
+  | MakeIntegrationConfig;
+
+/**
  * Google reCAPTCHA configuration (part of spam protection)
  */
 export interface RecaptchaConfig {
@@ -318,12 +454,41 @@ export interface RecaptchaConfig {
 }
 
 /**
+ * Cloudflare Turnstile configuration (Pro spam provider)
+ */
+export interface TurnstileConfig {
+  enabled: boolean;
+  siteKey?: string;
+  secretKey?: string;
+}
+
+/**
+ * hCaptcha configuration (Pro spam provider)
+ */
+export interface HcaptchaConfig {
+  enabled: boolean;
+  siteKey?: string;
+  secretKey?: string;
+}
+
+/**
+ * IP/country blocklist configuration (Pro spam provider)
+ */
+export interface IpBlocklistConfig {
+  ips?: string[];
+  countryCodes?: string[];
+}
+
+/**
  * Spam protection settings
  */
 export interface SpamSettings {
   honeypot: boolean;
   honeypotFieldName: string;
   recaptcha?: RecaptchaConfig;
+  turnstile?: TurnstileConfig;
+  hcaptcha?: HcaptchaConfig;
+  ipBlocklist?: IpBlocklistConfig;
 }
 
 /**
@@ -349,6 +514,7 @@ export interface FormSettings {
   spam: SpamSettings;
   rateLimit?: RateLimitConfig;
   customCss?: string;
+  integrations?: IntegrationConfig[];
 }
 
 /**
@@ -366,6 +532,8 @@ export interface Form {
   redirectUrl?: string;
   isActive: boolean;
   submissionCount: number;
+  requiresApproval?: boolean;
+  locales?: FormLocales;
   createdAt: string;
   updatedAt: string;
   publishedAt?: string;
@@ -374,7 +542,13 @@ export interface Form {
 /**
  * Submission status type
  */
-export type SubmissionStatus = 'new' | 'read' | 'processed' | 'archived' | 'spam';
+export type SubmissionStatus = 'new' | 'read' | 'processed' | 'archived' | 'spam' | 'draft';
+
+/**
+ * Approval workflow status (Business feature). Independent of {@link SubmissionStatus}.
+ */
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
 
 /**
  * Form submission entity
@@ -385,6 +559,8 @@ export interface FormSubmission {
   data: Record<string, unknown>;
   metadata: Record<string, unknown>;
   status: SubmissionStatus;
+  approvalStatus?: ApprovalStatus;
+  approvalNote?: string;
   ipAddress?: string;
   userAgent?: string;
   createdAt: string;
@@ -407,13 +583,20 @@ export interface FormSubmissionDetail extends FormSubmission {
  *
  * NOTE: this is exported as `FieldType` for backward compatibility — existing
  * hooks/components consume `FieldType` as this object shape. Use
- * {@link FieldTypeName} for the string-literal union of the 18 type names.
+ * {@link FieldTypeName} for the string-literal union of the 25 type names.
  */
 export interface FieldType {
-  type: FieldTypeName;
+  /**
+   * One of {@link FieldTypeName}, widened to accept Pro type names (e.g.
+   * `'signature'`, `'rating'`) the server may return before they are added to the
+   * `FieldTypeName` union. `string & {}` preserves autocomplete for known names.
+   */
+  type: FieldTypeName | (string & {});
   label: string;
   icon: string;
   category: FieldTypeCategory;
+  /** Licensing tier required to use this field type. Absent/undefined = free. */
+  tier?: 'free' | 'pro' | 'business';
 }
 
 /**
@@ -478,6 +661,18 @@ export interface FormPayload {
   successMessage?: string;
   redirectUrl?: string;
   isActive?: boolean;
+  /**
+   * Approval workflow toggle (Business). The server CONFIG gate
+   * (`controllers/form.ts`) blocks ENABLING this when not entitled; it never
+   * strips an already-enabled value.
+   */
+  requiresApproval?: boolean;
+  /**
+   * Multi-language overrides (Business). Round-trips through the form save path;
+   * the server save-gate blocks NEW locale content when not entitled and never
+   * strips existing locales.
+   */
+  locales?: FormLocales;
 }
 
 /**
@@ -508,9 +703,10 @@ export interface SubmissionsQueryParams {
 }
 
 /**
- * Export format options for submissions
+ * Export format options for submissions. xlsx/pdf are Pro-only (server enforces
+ * the 402); csv/json stay free.
  */
-export type ExportFormat = 'csv' | 'json';
+export type ExportFormat = 'csv' | 'json' | 'xlsx' | 'pdf';
 
 /**
  * Options for exporting submissions
@@ -519,4 +715,63 @@ export interface ExportOptions {
   format?: ExportFormat;
   status?: SubmissionStatus;
   includeIp?: boolean;
+}
+
+/**
+ * Scheduled/emailed export config (mirrors the server EE shape) used by the
+ * scheduling dialog. The persisted server config also carries `formId`, which is
+ * implicit from the route here.
+ */
+export interface ScheduledExportConfig {
+  cronExpression: string;
+  recipientEmails: string[];
+  format: 'xlsx' | 'pdf' | 'csv';
+}
+
+/**
+ * Result returned by the save-partial endpoint (POST /api/forms/:slug/partial).
+ * Requires a Pro license (saveResume feature).
+ */
+export interface SavePartialResult {
+  resumeToken: string;
+  expiresAt: string;
+}
+
+/**
+ * Saved partial submission data returned by GET /api/forms/:slug/partial/:resumeToken.
+ */
+export interface PartialSubmissionData {
+  data: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+}
+
+// Compliance (Business tier)
+export const COMPLIANCE_API = {
+  subject: `/${PLUGIN_ID}/compliance/subject`,
+  audit: `/${PLUGIN_ID}/compliance/audit`,
+} as const;
+
+/**
+ * A single compliance audit log entry (mirrors the server EE shape).
+ */
+export interface AuditEntry {
+  action: 'subject.export' | 'subject.delete' | 'submission.delete' | 'submission.bulkDelete';
+  actor: string;
+  target: string;
+  count?: number;
+  timestamp: string;
+}
+
+/**
+ * Per-subject export payload (GDPR right of access). `consents` is read from each
+ * submission's `metadata.consents` array.
+ */
+export interface SubjectExportResult {
+  submissions: Array<{
+    documentId: string;
+    createdAt: string;
+    data: Record<string, unknown>;
+    consents: unknown;
+  }>;
+  totalCount: number;
 }

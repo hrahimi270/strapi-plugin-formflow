@@ -19,9 +19,14 @@ import {
   Paragraph,
 } from '@strapi/icons';
 import { useIntl } from 'react-intl';
+import { useNotification } from '@strapi/strapi/admin';
 import styled from 'styled-components';
 
 import { getTranslation } from '../../utils/getTranslation';
+import { useLicense } from '../../ee/hooks/useLicense';
+import { FieldTypeLockState } from '../../ee/components/FieldTypeLockState';
+import { PURCHASE_URL } from '../../ee/components/UpsellCard';
+import type { FeatureKey, Tier } from '../../ee/feature-map';
 import type { FieldType } from '../../utils/api';
 
 export interface FieldTypeSelectorProps {
@@ -58,6 +63,7 @@ const getFieldIcon = (type: string) => {
     datetime: <Calendar />,
     file: <File />,
     hidden: <Eye />,
+    consent: <Check />,
     heading: <Pencil />,
     paragraph: <Paragraph />,
     divider: <Minus />,
@@ -121,7 +127,26 @@ export const FieldTypeSelector = ({
   isLoading = false,
 }: FieldTypeSelectorProps) => {
   const { formatMessage } = useIntl();
+  const { can } = useLicense();
+  const { toggleNotification } = useNotification();
   const [search, setSearch] = useState('');
+
+  // A field type is locked when it carries a non-free tier and the current
+  // license does not entitle its feature key. Most types map to `fields.<type>`
+  // (e.g. `fields.signature`), but `consent` is gated on `compliance.consent` to
+  // match the server save-gate (controllers/form.ts), so the builder's
+  // locked/unlocked state agrees with what the server will accept on save.
+  // Free/absent-tier types are never locked.
+  const isFieldTypeLocked = (fieldType: FieldType) => {
+    if (!fieldType.tier || fieldType.tier === 'free') {
+      return false;
+    }
+    const featureKey: FeatureKey =
+      fieldType.type === 'consent'
+        ? 'compliance.consent'
+        : (`fields.${fieldType.type}` as FeatureKey);
+    return !can(featureKey);
+  };
 
   const categoryLabel = (category: string) =>
     formatMessage({
@@ -157,8 +182,15 @@ export const FieldTypeSelector = ({
 
   const hasResults = Object.keys(groupedTypes).length > 0;
 
-  const handleSelect = (type: string) => {
-    onSelect(type);
+  const handleSelect = (fieldType: FieldType) => {
+    if (isFieldTypeLocked(fieldType)) {
+      toggleNotification({
+        type: 'info',
+        message: `This field type requires a Pro license. ${PURCHASE_URL}`,
+      });
+      return; // do not call onSelect
+    }
+    onSelect(fieldType.type);
     setSearch('');
     onClose();
   };
@@ -248,22 +280,31 @@ export const FieldTypeSelector = ({
                             direction="column"
                             alignItems="stretch"
                           >
-                            <FieldTypeTile
-                              type="button"
-                              onClick={() => handleSelect(fieldType.type)}
-                            >
-                              <Flex direction="column" alignItems="center" gap={2}>
-                                <Flex>{getFieldIcon(fieldType.type)}</Flex>
-                                <Typography
-                                  variant="pi"
-                                  fontWeight="bold"
-                                  textAlign="center"
-                                  textColor="neutral800"
-                                >
-                                  {typeLabel(fieldType)}
-                                </Typography>
-                              </Flex>
-                            </FieldTypeTile>
+                            {isFieldTypeLocked(fieldType) ? (
+                              <FieldTypeLockState
+                                label={typeLabel(fieldType)}
+                                icon={fieldType.icon}
+                                tier={fieldType.tier as Tier}
+                                onLockedClick={() => handleSelect(fieldType)}
+                              />
+                            ) : (
+                              <FieldTypeTile
+                                type="button"
+                                onClick={() => handleSelect(fieldType)}
+                              >
+                                <Flex direction="column" alignItems="center" gap={2}>
+                                  <Flex>{getFieldIcon(fieldType.type)}</Flex>
+                                  <Typography
+                                    variant="pi"
+                                    fontWeight="bold"
+                                    textAlign="center"
+                                    textColor="neutral800"
+                                  >
+                                    {typeLabel(fieldType)}
+                                  </Typography>
+                                </Flex>
+                              </FieldTypeTile>
+                            )}
                           </Grid.Item>
                         ))}
                       </Grid.Root>

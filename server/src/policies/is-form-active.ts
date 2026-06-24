@@ -30,7 +30,7 @@ interface FormRecord {
  *
  * Usage in routes:
  * ```
- * policies: ['plugin::strapi-forms.is-form-active']
+ * policies: ['plugin::formflow.is-form-active']
  * ```
  *
  * @param policyContext - Context containing route params
@@ -47,7 +47,7 @@ const isFormActivePolicy = async (
 
   // Check if slug parameter is provided
   if (!slug) {
-    strapi.log.warn('[Strapi Forms] is-form-active policy: No slug provided in route params');
+    strapi.log.warn('[FormFlow] is-form-active policy: No slug provided in route params');
     return false;
   }
 
@@ -55,37 +55,37 @@ const isFormActivePolicy = async (
     // Fetch the PUBLISHED form by slug. findBySlug requests status:'published',
     // so a missing record here means there is no published version (draft-only).
     const form = (await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .findBySlug(slug)) as FormRecord | null;
 
     // Form not found (no published version exists)
     if (!form) {
       strapi.log.debug(
-        `[Strapi Forms] is-form-active policy: No published form found: ${slug}`
+        `[FormFlow] is-form-active policy: No published form found: ${slug}`
       );
       return false;
     }
 
     // Form is inactive
     if (!form.isActive) {
-      strapi.log.debug(`[Strapi Forms] is-form-active policy: Form is inactive: ${slug}`);
+      strapi.log.debug(`[FormFlow] is-form-active policy: Form is inactive: ${slug}`);
       return false;
     }
 
     // Defensive: published records carry a non-null publishedAt. If for any
     // reason it is null, treat the form as unavailable.
     if (form.publishedAt === null) {
-      strapi.log.debug(`[Strapi Forms] is-form-active policy: Form is not published: ${slug}`);
+      strapi.log.debug(`[FormFlow] is-form-active policy: Form is not published: ${slug}`);
       return false;
     }
 
     // All checks passed - form is valid, active, and published
-    strapi.log.debug(`[Strapi Forms] is-form-active policy: Access granted for form: ${slug}`);
+    strapi.log.debug(`[FormFlow] is-form-active policy: Access granted for form: ${slug}`);
     return true;
   } catch (error) {
     // Log error and deny access on any unexpected errors
-    strapi.log.error('[Strapi Forms] is-form-active policy error:', error);
+    strapi.log.error('[FormFlow] is-form-active policy error:', error);
     return false;
   }
 };

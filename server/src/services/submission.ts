@@ -1,3 +1,5 @@
+import { randomBytes } from 'crypto';
+
 import type { Core } from '@strapi/strapi';
 
 import type { ValidatableField, UploadedFileMeta, UploadedFilesMap } from './validation';
@@ -31,74 +33,12 @@ export interface SubmissionFileRef {
 /**
  * Content type UID for form submissions
  */
-const SUBMISSION_CONTENT_TYPE_UID = 'plugin::strapi-forms.form-submission';
+const SUBMISSION_CONTENT_TYPE_UID = 'plugin::formflow.form-submission';
 
 /**
  * Plugin config id used to read privacy options (anonymizeIp, dataRetentionDays).
  */
-const PLUGIN_CONFIG_ID = 'plugin::strapi-forms';
-
-/**
- * Mask an IP address for storage when IP anonymization is enabled.
- *
- * - IPv4 (e.g. `192.168.1.42`): the final octet is zeroed -> `192.168.1.0`.
- * - IPv6 (e.g. `2001:db8:85a3::8a2e:370:7334`): truncated to the /64 prefix
- *   (first four hextets), with the host bits zeroed -> `2001:db8:85a3:0::`.
- *
- * Anything that does not look like a recognizable IPv4/IPv6 address is returned
- * unchanged (callers only invoke this when anonymization is enabled, and an
- * unparseable value is better passed through than silently dropped).
- *
- * @param ip - Raw IP address string
- * @returns The anonymized IP address string
- */
-export const anonymizeIpAddress = (ip: string): string => {
-  if (!ip || typeof ip !== 'string') {
-    return ip;
-  }
-
-  // IPv4-mapped IPv6 (e.g. ::ffff:192.168.1.42): anonymize the embedded IPv4.
-  const mappedMatch = ip.match(/^(::ffff:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
-  if (mappedMatch) {
-    return `${mappedMatch[1]}${anonymizeIpAddress(mappedMatch[2])}`;
-  }
-
-  // IPv4: zero the last octet.
-  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-    const octets = ip.split('.');
-    octets[3] = '0';
-    return octets.join('.');
-  }
-
-  // IPv6: keep the /64 prefix (first four hextets), zero the host portion.
-  if (ip.includes(':')) {
-    // Expand any `::` so we can reliably take the first four hextets.
-    const hasDoubleColon = ip.includes('::');
-    let hextets = ip.split(':');
-
-    if (hasDoubleColon) {
-      const [head, tail] = ip.split('::');
-      const headParts = head ? head.split(':') : [];
-      const tailParts = tail ? tail.split(':') : [];
-      const missing = 8 - headParts.length - tailParts.length;
-      if (missing < 0) {
-        // Malformed: leave untouched rather than corrupt it.
-        return ip;
-      }
-      hextets = [...headParts, ...Array(missing).fill('0'), ...tailParts];
-    }
-
-    if (hextets.length < 4) {
-      return ip;
-    }
-
-    const prefix = hextets.slice(0, 4).map((h) => h || '0');
-    // `prefix::` denotes the /64 network with all host bits zeroed.
-    return `${prefix.join(':')}::`;
-  }
-
-  return ip;
-};
+const PLUGIN_CONFIG_ID = 'plugin::formflow';
 
 /**
  * Request-body control field used to request validate-only, step-scoped
@@ -109,9 +49,18 @@ export const anonymizeIpAddress = (ip: string): string => {
 export const STEP_INDICATOR_FIELD = '_step';
 
 /**
- * Submission status values
+ * Submission status values. `draft` marks a partial (save & resume) record that
+ * has not yet been submitted in full; it is never surfaced in the admin inbox.
  */
-export type SubmissionStatus = 'new' | 'read' | 'processed' | 'archived' | 'spam';
+export type SubmissionStatus = 'new' | 'read' | 'processed' | 'archived' | 'spam' | 'draft';
+
+/**
+ * Approval workflow status (Business feature). Independent of {@link SubmissionStatus}:
+ * a submission carries both an inbox status and an approval decision. New
+ * submissions default to `pending`; admins transition to `approved`/`rejected`.
+ */
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
 
 /**
  * Metadata collected from the submission request
@@ -133,6 +82,8 @@ export interface FormSubmission {
   data: Record<string, unknown>;
   metadata: SubmissionMetadata;
   status: SubmissionStatus;
+  approvalStatus?: ApprovalStatus;
+  approvalNote?: string;
   ipAddress?: string;
   userAgent?: string;
   createdAt: string;
@@ -196,6 +147,24 @@ export interface StepValidationResult {
 }
 
 /**
+ * Result of persisting a partial (save & resume) submission. The `resumeToken`
+ * is the opaque key the client stores and replays to resume; `expiresAt` is an
+ * ISO timestamp 7 days out, advisory for the frontend.
+ */
+export interface PartialSubmissionResult {
+  resumeToken: string;
+  expiresAt: string;
+}
+
+/**
+ * A previously-saved partial submission, returned when resuming by token.
+ */
+export interface PartialSubmissionData {
+  data: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+}
+
+/**
  * Form structure for submission processing
  */
 export interface SubmittableForm {
@@ -214,9 +183,15 @@ export interface SubmittableForm {
     emailNotifications?: Array<{
       enabled: boolean;
       to: string[];
+      cc?: string[];
+      bcc?: string[];
       subject?: string;
       template?: string;
       replyTo?: string;
+      includeData?: boolean;
+      isAutoresponder?: boolean;
+      toField?: string;
+      omitBranding?: boolean;
     }>;
     webhooks?: Array<{
       enabled: boolean;
@@ -229,8 +204,34 @@ export interface SubmittableForm {
   successMessage?: string;
   redirectUrl?: string;
   submissionCount?: number;
+  /**
+   * Form-level approval toggle (Business feature). When true, every new
+   * submission is created with `approvalStatus: 'pending'` so it lands in the
+   * pending-approval queue. The entitlement is enforced at config time (admin
+   * toggle + server form-save gate) and at the approve action — submit() never
+   * gates on it.
+   */
+  requiresApproval?: boolean;
   updatedAt: string;
 }
+
+/**
+ * Merge a default `status: { $ne: 'draft' }` into a query's filters so save &
+ * resume drafts are hidden from inbox/count/export by default.
+ *
+ * An explicit caller-supplied `status` filter always wins (a direct value or any
+ * `$ne`/`$eq`/`$in`/etc. operator the caller set on purpose), so the internal
+ * draft lookups and per-status counts are never overridden. Only when `status`
+ * is absent is the default exclusion applied.
+ */
+const withDefaultDraftExclusion = (
+  filters: Record<string, unknown> = {}
+): Record<string, unknown> => {
+  if (filters && Object.prototype.hasOwnProperty.call(filters, 'status')) {
+    return filters;
+  }
+  return { ...filters, status: { $ne: 'draft' } };
+};
 
 /**
  * Submission service for handling form submissions
@@ -256,8 +257,8 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     metadata: SubmissionMetadata,
     files: UploadedFilesMap = {}
   ): Promise<SubmissionResult> {
-    const formService = strapi.plugin('strapi-forms').service('form');
-    const validationService = strapi.plugin('strapi-forms').service('validation');
+    const formService = strapi.plugin('formflow').service('form');
+    const validationService = strapi.plugin('formflow').service('validation');
 
     // Get form by slug
     const form = (await formService.findBySlug(slug)) as SubmittableForm | null;
@@ -321,15 +322,42 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     // exactly as before. When enabled, the masked IP is stored in BOTH the
     // top-level `ipAddress` column and `metadata.ipAddress` so no raw IP is
     // retained anywhere.
+    //
+    // IP anonymization is a Business feature (compliance.anonymizeIp). When the
+    // license is not entitled the raw IP is stored regardless of the config flag.
+    // The entitlement check must never fail the submission, so it fails closed to
+    // "not entitled" (raw IP) if the license service ever throws.
+    let canAnonymize = false;
+    try {
+      canAnonymize = strapi.plugin('formflow').service('license').can('compliance.anonymizeIp');
+    } catch {
+      canAnonymize = false;
+    }
     const config = strapi.config.get(PLUGIN_CONFIG_ID, {}) as {
       anonymizeIp?: boolean;
     };
-    const storedIpAddress =
-      config?.anonymizeIp && metadata.ipAddress
-        ? anonymizeIpAddress(metadata.ipAddress)
-        : metadata.ipAddress;
+    let storedIpAddress = metadata.ipAddress;
+    if (canAnonymize && config?.anonymizeIp && metadata.ipAddress) {
+      // Lazy + guarded: in a stripped MIT fork `ee/compliance` is absent, so the
+      // import throws and we fall back to storing the raw IP (free behaviour).
+      // `can(...)` is false when EE is stripped, so this load is in practice only
+      // reached when the module is present.
+      try {
+        const { anonymizeIpAddress } = await import('../ee/compliance');
+        storedIpAddress = anonymizeIpAddress(metadata.ipAddress);
+      } catch {
+        storedIpAddress = metadata.ipAddress;
+      }
+    }
 
-    // Create submission record
+    // Create submission record.
+    //
+    // When the parent form requires approval, the record enters the
+    // pending-approval queue with `approvalStatus: 'pending'`. This is a free
+    // runtime capture concern — submission is NEVER gated; the `approval`
+    // entitlement is enforced at config time (admin toggle + form-save gate) and
+    // at the approve action. When the form does not require approval, no
+    // `approvalStatus` is written (unchanged behaviour for non-approval forms).
     const submission = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).create({
       data: {
         form: form.documentId,
@@ -340,6 +368,9 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
           formVersion: form.updatedAt,
         },
         status: 'new' as SubmissionStatus,
+        ...(form.requiresApproval
+          ? { approvalStatus: 'pending' as ApprovalStatus }
+          : {}),
         ipAddress: storedIpAddress,
         userAgent: metadata.userAgent,
       },
@@ -348,9 +379,55 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     // Update form submission count
     await formService.incrementSubmissionCount(form.documentId);
 
+    // Capture structured consent records (Business: compliance.consent). The row
+    // is already persisted above with the consent booleans inside `data`; this
+    // EXEC gate only adds the structured `metadata.consents` array in a follow-up
+    // update, so it can never block or fail the submission. When the license is
+    // not entitled the array is simply never written. The gate fails closed to
+    // "not entitled" if the license service throws, and the update is wrapped so
+    // a write failure never surfaces to the submitter.
+    let canConsent = false;
+    try {
+      canConsent = strapi.plugin('formflow').service('license').can('compliance.consent');
+    } catch {
+      canConsent = false;
+    }
+    if (canConsent) {
+      try {
+        const capturedAt = new Date().toISOString();
+        const consents = formFields
+          .filter((field) => field.type === 'consent')
+          .map((field) => ({
+            field: field.name,
+            label: field.label,
+            accepted: sanitizedData[field.name] === true,
+            capturedAt,
+          }));
+
+        if (consents.length > 0) {
+          await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
+            documentId: submission.documentId,
+            data: {
+              metadata: {
+                ...metadata,
+                ipAddress: storedIpAddress,
+                formVersion: form.updatedAt,
+                consents,
+              },
+            } as Record<string, unknown>,
+          });
+        }
+      } catch (error) {
+        strapi.log.error('[FormFlow] Consent capture error:', error);
+      }
+    }
+
+    // Fire-and-forget: analytics completion — must not block or throw
+    strapi.plugin('formflow').service('analytics').recordEvent(form.documentId, 'completion');
+
     // Trigger post-submission hooks asynchronously (don't block response)
     this.triggerPostSubmissionHooks(form, submission, sanitizedData).catch((error: Error) => {
-      strapi.log.error('[Strapi Forms] Post-submission hook error:', error);
+      strapi.log.error('[FormFlow] Post-submission hook error:', error);
     });
 
     return {
@@ -390,8 +467,8 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     data: Record<string, unknown>,
     stepIndicator: string | number
   ): Promise<StepValidationResult> {
-    const formService = strapi.plugin('strapi-forms').service('form');
-    const validationService = strapi.plugin('strapi-forms').service('validation');
+    const formService = strapi.plugin('formflow').service('form');
+    const validationService = strapi.plugin('formflow').service('validation');
 
     const form = (await formService.findBySlug(slug)) as SubmittableForm | null;
 
@@ -416,6 +493,18 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     if (!step) {
       throw new Error('Step not found');
     }
+
+    // Fire-and-forget: analytics start (step 0) / drop-off (later steps) — the
+    // last validated step is the furthest the user reached. Never blocks/throws.
+    const isFirstStep = steps.indexOf(step) === 0;
+    strapi
+      .plugin('formflow')
+      .service('analytics')
+      .recordEvent(
+        form.documentId,
+        isFirstStep ? 'start' : 'drop_off',
+        isFirstStep ? undefined : step.id
+      );
 
     // Work on a copy with control/spam fields stripped, mirroring submit().
     const submissionData = { ...data };
@@ -562,7 +651,11 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     const results = await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).findMany({
       ...query,
       filters: {
-        ...query.filters,
+        // Hide save & resume drafts by default: every inbox/export path goes
+        // through find(). When the caller pins `status` explicitly (e.g. the
+        // savePartial/getPartial draft lookups, which query findMany directly,
+        // or a specific status selected in the inbox), that filter wins.
+        ...withDefaultDraftExclusion(query.filters),
         form: { documentId: formId },
       },
       sort: query.sort || { createdAt: 'desc' },
@@ -620,9 +713,47 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     // so merely opening a submission does not emit a webhook.
     if (triggerWebhooks) {
       this.triggerUpdateWebhooks(result, data).catch((error: Error) => {
-        strapi.log.error('[Strapi Forms] submission.updated webhook error:', error);
+        strapi.log.error('[FormFlow] submission.updated webhook error:', error);
       });
     }
+
+    return result;
+  },
+
+  /**
+   * Transition a submission's approval status (Business feature).
+   *
+   * Validates the requested status, updates `approvalStatus`/`approvalNote`, and
+   * fires the `submission.updated` webhook so approval decisions are observable.
+   * The license check lives in the controller (see {@link controllers/submission})
+   * — this method keeps the MIT service free of entitlement logic.
+   *
+   * @param documentId - Submission documentId
+   * @param approvalStatus - New approval status (`pending`|`approved`|`rejected`)
+   * @param approvalNote - Optional note explaining the decision
+   * @returns Updated submission record
+   */
+  async approveSubmission(
+    documentId: string,
+    approvalStatus: ApprovalStatus,
+    approvalNote?: string
+  ): Promise<FormSubmission> {
+    if (!APPROVAL_STATUSES.includes(approvalStatus)) {
+      throw new Error(`Invalid approvalStatus. Must be one of: ${APPROVAL_STATUSES.join(', ')}`);
+    }
+
+    const changed = { approvalStatus, approvalNote: approvalNote ?? null };
+
+    const result = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
+      documentId,
+      data: changed as Record<string, unknown>,
+      populate: ['form'],
+    })) as unknown as FormSubmission;
+
+    // Surface approval transitions in webhooks, in the background.
+    this.triggerUpdateWebhooks(result, changed).catch((error: Error) => {
+      strapi.log.error('[FormFlow] submission.updated (approval) webhook error:', error);
+    });
 
     return result;
   },
@@ -640,12 +771,19 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     submission: FormSubmission,
     changed: Record<string, unknown>
   ): Promise<void> {
+    // Webhooks are a Pro feature. When not entitled, skip dispatch entirely —
+    // the update has already persisted in the caller.
+    if (!strapi.plugin('formflow').service('license').can('webhooks')) {
+      strapi.log.info('[FormFlow] Webhooks skipped (submission.updated): not entitled');
+      return;
+    }
+
     const formRef = submission.form as { documentId?: string } | undefined;
     if (!formRef?.documentId) {
       return;
     }
 
-    const formService = strapi.plugin('strapi-forms').service('form');
+    const formService = strapi.plugin('formflow').service('form');
     const form = (await formService.findOne(formRef.documentId)) as SubmittableForm | null;
 
     const webhooks = form?.settings?.webhooks;
@@ -653,7 +791,7 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       return;
     }
 
-    const webhookService = strapi.plugin('strapi-forms').service('webhook');
+    const webhookService = strapi.plugin('formflow').service('webhook');
 
     const webhookFormContext = {
       documentId: form!.documentId,
@@ -725,57 +863,23 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
    * Delete every submission older than `days` days (data-retention purge).
    *
    * Used by the daily retention cron job registered in bootstrap when the plugin
-   * config `dataRetentionDays` is greater than 0. Submissions whose `createdAt`
-   * predates `now - days` are removed in batches to avoid a single huge query
-   * that could exhaust the DB connection pool. Deleting through the low-level
-   * `strapi.db.query` (rather than the document service per-record) keeps the
-   * purge efficient for large tables.
-   *
-   * A non-positive `days` is treated as a no-op (retention disabled) and returns
-   * 0 without touching the database, so this is always safe to call.
+   * config `dataRetentionDays` is greater than 0. Delegates to the EE compliance
+   * engine, which performs the batched purge. A non-positive `days` is treated as
+   * a no-op (retention disabled) and returns 0, so this is always safe to call.
    *
    * @param days - Retention window in days; submissions older than this are purged
    * @returns The number of submissions deleted
    */
   async deleteOlderThan(days: number): Promise<number> {
-    if (typeof days !== 'number' || !Number.isFinite(days) || days <= 0) {
+    // Lazy + guarded: in a stripped MIT fork `ee/compliance` is absent, so the
+    // retention purge is a no-op (returns 0). The retention cron is only
+    // registered when entitled, so this is in practice only reached with EE present.
+    try {
+      const { deleteOlderThan: deleteOlderThanEE } = await import('../ee/compliance');
+      return deleteOlderThanEE(strapi, days);
+    } catch {
       return 0;
     }
-
-    const BATCH_SIZE = 1000;
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-    let totalDeleted = 0;
-    let deleted: number;
-
-    do {
-      // Fetch up to BATCH_SIZE expired ids first, then delete them by id.
-      const expired = (await strapi.db.query(SUBMISSION_CONTENT_TYPE_UID).findMany({
-        select: ['id'],
-        where: { created_at: { $lt: cutoff } },
-        limit: BATCH_SIZE,
-      })) as Array<{ id: number | string }>;
-
-      const ids = expired.map((row) => row.id);
-      deleted = ids.length;
-
-      if (deleted > 0) {
-        await strapi.db.query(SUBMISSION_CONTENT_TYPE_UID).deleteMany({
-          where: { id: { $in: ids } },
-        });
-        totalDeleted += deleted;
-      }
-
-      // A full batch likely means more rows remain; a short batch means done.
-    } while (deleted >= BATCH_SIZE);
-
-    if (totalDeleted > 0) {
-      strapi.log.info(
-        `[Strapi Forms] Data retention: deleted ${totalDeleted} submission(s) older than ${days} day(s).`
-      );
-    }
-
-    return totalDeleted;
   },
 
   /**
@@ -788,7 +892,10 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
   async count(formId: string, filters: Record<string, unknown> = {}): Promise<number> {
     return strapi.documents(SUBMISSION_CONTENT_TYPE_UID).count({
       filters: {
-        ...filters,
+        // Mirror find(): exclude drafts from the pagination total by default,
+        // unless the caller pins `status` explicitly (e.g. getStats counts each
+        // non-draft status by name).
+        ...withDefaultDraftExclusion(filters),
         form: { documentId: formId },
       },
     });
@@ -870,10 +977,16 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
     data: Record<string, unknown>
   ): Promise<void> {
     const settings = form.settings || {};
+    const licenseService = strapi.plugin('formflow').service('license');
 
     // Email notifications
     if (settings.emailNotifications?.length) {
-      const emailService = strapi.plugin('strapi-forms').service('email');
+      const emailService = strapi.plugin('formflow').service('email');
+
+      // Multiple email notifications are a Pro feature (email.advanced). When not
+      // entitled only the FIRST enabled notification fires; the rest are skipped.
+      const canAdvancedEmail = licenseService.can('email.advanced');
+      let sentCount = 0;
 
       // Prepare form context for email
       const formContext = {
@@ -897,21 +1010,83 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
       // Send all configured notifications
       for (const notification of settings.emailNotifications) {
         if (notification.enabled && notification.to?.length) {
+          // On the free tier the single admin email is reserved for a regular
+          // (non-autoresponder) notification. Autoresponders are dispatched by the
+          // Pro-only Gate #6 below and are skipped on free, so they must never
+          // consume the one free admin slot — otherwise a free user who ordered
+          // [autoresponder, admin-notification] would receive no email at all.
+          if (!canAdvancedEmail && notification.isAutoresponder) {
+            continue;
+          }
+          // Without email.advanced, stop after the first sent notification.
+          if (sentCount >= 1 && !canAdvancedEmail) {
+            break;
+          }
+          sentCount += 1;
+
           // Run in background to not block response
           emailService
             .sendSubmissionNotification(notification, formContext, submissionContext, data)
             .catch((error: Error) => {
               strapi.log.error(
-                `[Strapi Forms] Email notification failed for form "${form.title}": ${error.message}`
+                `[FormFlow] Email notification failed for form "${form.title}": ${error.message}`
               );
             });
         }
       }
+
+      // --- Gate #6: autoresponder (Pro) ---
+      // Dispatch a separate email to the submitter for each autoresponder-flagged
+      // notification. EXEC gate: the submission is already persisted, so this must
+      // never throw or block the response. When not entitled the block is skipped
+      // silently — the free admin notification loop above already fired.
+      try {
+        if (licenseService.can('email.autoresponder')) {
+          const { resolveAutoresponderRecipient } = await import('../ee/email/index');
+          for (const notification of settings.emailNotifications) {
+            if (!notification.enabled || !notification.isAutoresponder) continue;
+
+            // Resolve recipient from the submitted email field.
+            const recipient = resolveAutoresponderRecipient(
+              data,
+              form.fields ?? [],
+              notification.toField
+            );
+            if (!recipient) {
+              strapi.log.warn(
+                `[FormFlow] Autoresponder skipped for form "${form.title}": no email field found in submission`
+              );
+              continue;
+            }
+
+            // Override `to` with the submitter's email; cc/bcc are forwarded as-is.
+            const autoConfig = { ...notification, to: [recipient] };
+            emailService
+              .sendSubmissionNotification(autoConfig, formContext, submissionContext, data)
+              .catch((error: Error) => {
+                strapi.log.error(
+                  `[FormFlow] Autoresponder email failed for form "${form.title}": ${error.message}`
+                );
+              });
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        strapi.log.error(`[FormFlow] Autoresponder dispatch failed for form "${form.title}": ${message}`);
+      }
+      // --- End Gate #6 ---
     }
 
     // Webhooks
     if (settings.webhooks?.length) {
-      const webhookService = strapi.plugin('strapi-forms').service('webhook');
+      // Webhooks are a Pro feature. When not entitled, skip dispatch entirely —
+      // the submission is already persisted at this point.
+      if (!licenseService.can('webhooks')) {
+        strapi.log.info('[FormFlow] Webhooks skipped: not entitled (upgrade to Pro)');
+        return;
+      }
+
+      const webhookService = strapi.plugin('formflow').service('webhook');
 
       // Prepare form context for webhook
       const webhookFormContext = {
@@ -939,10 +1114,211 @@ const submissionService = ({ strapi }: { strapi: Core.Strapi }) => ({
         )
         .catch((error: Error) => {
           strapi.log.error(
-            `[Strapi Forms] Webhook trigger failed for form "${form.title}": ${error.message}`
+            `[FormFlow] Webhook trigger failed for form "${form.title}": ${error.message}`
           );
         });
     }
+
+    // Pre-built integrations (Pro)
+    // EXEC gate: the submission is already persisted, so this is fire-and-forget
+    // and must never throw or block the response. The dynamic import keeps this
+    // MIT-licensed file free of a static dependency on EE code, and the
+    // `integrationsList.length` guard means there is zero runtime cost (no import,
+    // no license lookup) when a form configures no integrations.
+    // We import the `../ee` barrel (already eagerly loaded at plugin start via
+    // `import './ee'` in server/src/index.ts) rather than the deep
+    // `../ee/integrations/index` path: importing the deep path is BOTH a dynamic
+    // target here AND statically re-exported by the barrel, which makes the bundler
+    // hoist the integration senders into a standalone _chunks file. Routing through
+    // the barrel resolves to the entry-resident module, so the senders ship inline
+    // in dist/server/index.{js,mjs} (the EE sentinel/bundling guard scans that file).
+    const integrationsList: unknown[] =
+      ((settings as Record<string, unknown>).integrations as unknown[]) ?? [];
+    if (integrationsList.length) {
+      if (licenseService.can('integrations')) {
+        const { integrationsServiceFactory } = await import('../ee');
+        const intSvc = integrationsServiceFactory(strapi);
+        intSvc.dispatch(
+          integrationsList as import('../ee/integrations/index').IntegrationConfig[],
+          'submission.created',
+          { documentId: form.documentId, title: form.title, slug: form.slug },
+          {
+            documentId: submission.documentId,
+            status: submission.status,
+            createdAt: submission.createdAt as string,
+          },
+          data
+        );
+      }
+    }
+  },
+
+  /**
+   * Persist (or update) a partial submission for save & resume.
+   *
+   * Unlike {@link submit} this stores INCOMPLETE form data under a `draft`
+   * status and never validates it, uploads files, fires hooks, or bumps the
+   * submission count. The returned `resumeToken` is stored in the draft's
+   * metadata; replaying it (via `resumeToken`) updates the same draft in place
+   * instead of creating a new one.
+   *
+   * Save & resume is a Pro feature: the call throws a typed 402 when the license
+   * is not entitled (the public controller maps it to an HTTP 402). It must
+   * NEVER silently no-op.
+   *
+   * @param slug - Form slug identifier
+   * @param partialData - Raw, possibly-incomplete submission data (keyed by name)
+   * @param metadata - Client metadata (IP, user agent, etc.)
+   * @param resumeToken - When provided, updates the matching existing draft
+   * @returns The resume token and an ISO expiry 7 days out
+   * @throws { status: 402 } when the license is not entitled
+   * @throws Error if the form is not found or inactive
+   */
+  async savePartial(
+    slug: string,
+    partialData: Record<string, unknown>,
+    metadata: SubmissionMetadata,
+    resumeToken?: string
+  ): Promise<PartialSubmissionResult> {
+    if (!strapi.plugin('formflow').service('license').can('saveResume')) {
+      throw {
+        status: 402,
+        name: 'PaymentRequiredError',
+        message: 'Save & resume requires a Pro license',
+      };
+    }
+
+    const formService = strapi.plugin('formflow').service('form');
+    const validationService = strapi.plugin('formflow').service('validation');
+
+    const form = (await formService.findBySlug(slug)) as SubmittableForm | null;
+
+    if (!form) {
+      throw new Error('Form not found');
+    }
+
+    if (!form.isActive) {
+      throw new Error('Form is not accepting submissions');
+    }
+
+    // Create a mutable copy of the partial data and strip control/honeypot
+    // fields exactly as a full submit would, so neither is ever persisted.
+    const draftData = { ...partialData };
+    delete draftData[STEP_INDICATOR_FIELD];
+
+    if (form.settings?.spam?.honeypot) {
+      const honeypotFieldName = form.settings.spam.honeypotFieldName || '_gotcha';
+      delete draftData[honeypotFieldName];
+    }
+
+    // Partial data is incomplete by definition: sanitize (strip unknown fields,
+    // coerce types) but do NOT validate, upload files, or trigger hooks.
+    const sanitizedData = validationService.sanitize(form.fields || [], draftData);
+
+    // Resume an existing draft when a token is replayed, otherwise create a new one.
+    if (resumeToken) {
+      // The token lives inside the `metadata` JSON column. Querying JSON sub-keys
+      // is not portable across DB connectors, so filter by the relational/enum
+      // columns (form + draft status) and match the token in memory. Drafts per
+      // form are bounded, so this stays cheap.
+      const drafts = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).findMany({
+        filters: {
+          status: 'draft',
+          form: { documentId: form.documentId },
+        },
+      })) as unknown as Array<{ documentId: string; metadata?: Record<string, unknown> }>;
+
+      const existing = drafts.find((d) => d.metadata?.resumeToken === resumeToken);
+
+      if (existing) {
+        await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).update({
+          documentId: existing.documentId,
+          data: {
+            data: sanitizedData,
+            metadata: {
+              ...(existing.metadata || {}),
+              resumeToken,
+              updatedAt: new Date().toISOString(),
+            },
+          } as Record<string, unknown>,
+        });
+
+        return {
+          resumeToken,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+      }
+    }
+
+    const newToken = randomBytes(32).toString('hex');
+
+    await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).create({
+      data: {
+        form: form.documentId,
+        data: sanitizedData,
+        metadata: {
+          ...metadata,
+          resumeToken: newToken,
+          formVersion: form.updatedAt,
+        },
+        status: 'draft' as SubmissionStatus,
+      },
+    });
+
+    return {
+      resumeToken: newToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+  },
+
+  /**
+   * Retrieve a previously-saved partial submission by its resume token.
+   *
+   * Save & resume is a Pro feature: throws a typed 402 when unentitled (the
+   * public controller maps it to HTTP 402). Returns `null` when no draft matches
+   * the token (the controller maps that to a 404).
+   *
+   * @param slug - Form slug identifier
+   * @param resumeToken - The token returned by {@link savePartial}
+   * @returns The stored partial data + metadata, or null if no draft matches
+   * @throws { status: 402 } when the license is not entitled
+   * @throws Error if the form is not found
+   */
+  async getPartial(slug: string, resumeToken: string): Promise<PartialSubmissionData | null> {
+    if (!strapi.plugin('formflow').service('license').can('saveResume')) {
+      throw {
+        status: 402,
+        name: 'PaymentRequiredError',
+        message: 'Save & resume requires a Pro license',
+      };
+    }
+
+    const formService = strapi.plugin('formflow').service('form');
+    const form = (await formService.findBySlug(slug)) as SubmittableForm | null;
+
+    if (!form) {
+      throw new Error('Form not found');
+    }
+
+    // Match the token in memory: JSON sub-key filters are not portable across
+    // DB connectors, so narrow by form + draft status and find the token here.
+    const drafts = (await strapi.documents(SUBMISSION_CONTENT_TYPE_UID).findMany({
+      filters: {
+        status: 'draft',
+        form: { documentId: form.documentId },
+      },
+    })) as unknown as Array<{
+      data: Record<string, unknown>;
+      metadata: Record<string, unknown>;
+    }>;
+
+    const record = drafts.find((d) => d.metadata?.resumeToken === resumeToken);
+
+    if (!record) {
+      return null;
+    }
+
+    return { data: record.data, metadata: record.metadata };
   },
 });
 

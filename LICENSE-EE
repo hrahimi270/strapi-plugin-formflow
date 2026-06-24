@@ -1,0 +1,143 @@
+FormFlow Enterprise Edition License
+
+Copyright (c) 2024 Bardiya. All rights reserved.
+
+---
+
+PREAMBLE
+
+This license ("License-EE") governs all files located under any `ee/` directory
+within the FormFlow plugin repository (i.e., `server/src/ee/` and `admin/src/ee/`).
+These files are NOT covered by the MIT license at the root of this repository.
+This software is source-available but NOT open source.
+
+---
+
+GRANT OF RIGHTS
+
+Subject to the terms and restrictions of this License-EE, copyright holder grants
+you a limited, non-exclusive, non-transferable, non-sublicensable right to:
+
+1. VIEW the source code for evaluation, audit, and security review purposes.
+2. RUN the software in a non-production environment (local development, staging)
+   for the sole purpose of evaluating whether to purchase a license.
+
+No other rights are granted unless a valid FormFlow license key has been obtained
+via purchase (see below).
+
+---
+
+PRODUCTION USE REQUIRES A VALID LICENSE KEY
+
+Production use of any file covered by this License-EE requires a valid FormFlow
+license key obtained via purchase from the official FormFlow store on Lemon Squeezy.
+A "production environment" is any environment that serves real users, processes
+real data, or supports any business operations beyond evaluation.
+
+To use FormFlow Pro or Business features in production:
+1. Purchase a license at the official FormFlow store (TBD-before-launch).
+2. Set the environment variable `STRAPI_FORMS_LICENSE_KEY=<your_key>` in the
+   host Strapi project's `.env` file.
+3. Restart the Strapi server.
+
+License keys are validated at runtime by the license service against the
+Lemon Squeezy License Key API. A 14-day grace period applies to temporary
+network connectivity failures only; revoked or expired keys hard-expire
+immediately with no grace period.
+
+---
+
+RESTRICTIONS
+
+The following are expressly prohibited:
+
+1. NO PRODUCTION USE WITHOUT KEY. You may not use any ee/ file in a production
+   environment without a valid, active FormFlow license key obtained via purchase.
+
+2. NO REDISTRIBUTION. You may not redistribute, publish, sell, sublicense, or
+   otherwise transfer any ee/ file, whether standalone or embedded in a derivative
+   work, product, or service, with or without modification.
+
+3. NO REMOVAL OR CIRCUMVENTION OF LICENSE CHECKS. You may not remove, disable,
+   bypass, replace, or circumvent any license validation logic within ee/ code or
+   within the license service (server/src/services/license.ts). This includes but
+   is not limited to: stubbing the license service to return active/pro/business;
+   modifying the feature-tier map to lower tier requirements; patching the MoR
+   client to skip remote validation; or any other technique that causes the software
+   to behave as if a valid license key is present when one is not.
+
+4. NO DERIVATIVES FOR CIRCUMVENTION. You may not create or distribute any
+   derivative work, patch, or tool whose primary purpose is to circumvent the
+   license checks or restrictions of this License-EE.
+
+5. NO FALSE ATTRIBUTION. You may not represent any ee/ file or derivative thereof
+   as being licensed under the MIT license or any other open-source license.
+
+---
+
+OPEN-CORE SAFETY PROPERTY
+
+The server MIT entrypoints (files outside any ee/ directory under server/src/) are
+build-strip-safe: they use lazy dynamic imports guarded by try/catch so that removing
+the server/src/ee/ tree causes each feature to degrade to free / can()===false behaviour
+rather than crashing. A fork that strips only server/src/ee/ obtains a fully functional
+free server install.
+
+The admin panel MIT files (files outside admin/src/ee/) are NOT build-strip-safe:
+they statically import from admin/src/ee/ using ESM static imports that cannot be
+guarded by try/catch. A fork that also wants a stripped admin panel must rebuild the
+admin without the admin/src/ee/ import surface. The admin degrades to free at RUNTIME
+via the free sentinel default in admin/src/ee/context/LicenseContext.ts (can() always
+false, tier/state 'free'), so the panel renders free whenever the license fetch fails
+or the provider is absent -- no crash, no over-grant, all gated controls show
+locked/upsell UI.
+
+This distinction is intentional and documented. The server build-strip guarantee applies
+only to server/src/ entrypoints.
+
+---
+
+ENFORCEMENT / ANTI-PIRACY
+
+Violation of the restrictions above constitutes the express legal basis for:
+- GitHub DMCA takedown requests targeting repositories that distribute ee/ code
+  in violation of this license.
+- npm package dispute reports and policy violation reports targeting packages that
+  bundle or embed ee/ code in violation of this license.
+- Any other civil or legal remedies available under applicable copyright law.
+
+Per-file SPDX headers (`/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE ...
+*/`) make the commercial status of every ee/ file unambiguous in any copied file,
+facilitating identification and enforcement.
+
+---
+
+TERMINATION
+
+Your rights under this License-EE terminate automatically, immediately, and without
+notice if:
+- You violate any restriction in this License-EE.
+- Your paid license key expires or is revoked by the copyright holder.
+- You fail to renew a subscription-based license within the applicable grace period
+  (grace applies only to connectivity failures, not to expired or revoked keys).
+
+Upon termination, you must cease all use of ee/ files and destroy all copies in
+your possession.
+
+---
+
+DISCLAIMER OF WARRANTIES
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+CONTACT
+
+For licensing inquiries, purchase information, or to report a license violation,
+contact: TBD-before-launch

@@ -1,19 +1,19 @@
 import type { Permission } from '@strapi/strapi/admin';
 
 /**
- * RBAC permission groups for the Strapi Forms plugin.
+ * RBAC permission groups for the FormFlow plugin.
  *
  * Each entry is a list of admin `Permission` objects (the shape the admin RBAC
  * APIs expect: `addMenuLink({ permissions })`, `<Page.Protect permissions>` and
  * `useRBAC(permissions)`). The server registers the matching action UIDs via
  * `actionProvider.registerMany` (see `server/src/register.ts`), so these action
- * strings must stay in sync with the `plugin::strapi-forms.*` UIDs there.
+ * strings must stay in sync with the `plugin::formflow.*` UIDs there.
  *
  * `useRBAC` derives an allowed-action flag from the LAST dot-segment of each
  * action, hyphen-camelCased, e.g.
- *   - `plugin::strapi-forms.form.read`        -> `canRead`
- *   - `plugin::strapi-forms.form.create`      -> `canCreate`
- *   - `plugin::strapi-forms.submission.export`-> `canExport`
+ *   - `plugin::formflow.form.read`        -> `canRead`
+ *   - `plugin::formflow.form.create`      -> `canCreate`
+ *   - `plugin::formflow.submission.export`-> `canExport`
  * Because `form.read` and `submission.read` both collapse to `canRead`, only
  * pass the group relevant to the current page to `useRBAC` to avoid collisions.
  */
@@ -32,21 +32,21 @@ const buildPermission = (action: string): Permission => ({
  * menu link and the protected app shell).
  */
 export const FORM_PERMISSIONS = {
-  main: [buildPermission('plugin::strapi-forms.form.read')],
-  read: [buildPermission('plugin::strapi-forms.form.read')],
-  create: [buildPermission('plugin::strapi-forms.form.create')],
-  update: [buildPermission('plugin::strapi-forms.form.update')],
-  delete: [buildPermission('plugin::strapi-forms.form.delete')],
+  main: [buildPermission('plugin::formflow.form.read')],
+  read: [buildPermission('plugin::formflow.form.read')],
+  create: [buildPermission('plugin::formflow.form.create')],
+  update: [buildPermission('plugin::formflow.form.update')],
+  delete: [buildPermission('plugin::formflow.form.delete')],
 } satisfies Record<string, Permission[]>;
 
 /**
  * Submission-management permissions.
  */
 export const SUBMISSION_PERMISSIONS = {
-  read: [buildPermission('plugin::strapi-forms.submission.read')],
-  update: [buildPermission('plugin::strapi-forms.submission.update')],
-  delete: [buildPermission('plugin::strapi-forms.submission.delete')],
-  export: [buildPermission('plugin::strapi-forms.submission.export')],
+  read: [buildPermission('plugin::formflow.submission.read')],
+  update: [buildPermission('plugin::formflow.submission.update')],
+  delete: [buildPermission('plugin::formflow.submission.delete')],
+  export: [buildPermission('plugin::formflow.submission.export')],
 } satisfies Record<string, Permission[]>;
 
 /**

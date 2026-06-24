@@ -57,10 +57,18 @@
       "type": "integer",
       "default": 0
     },
+    "requiresApproval": {
+      "type": "boolean",
+      "default": false
+    },
+    "locales": {
+      "type": "json",
+      "default": {}
+    },
     "submissions": {
       "type": "relation",
       "relation": "oneToMany",
-      "target": "plugin::strapi-forms.form-submission",
+      "target": "plugin::formflow.form-submission",
       "mappedBy": "form"
     }
   }

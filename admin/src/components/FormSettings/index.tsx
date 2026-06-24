@@ -23,16 +23,25 @@ import type {
 } from '../../utils/api';
 import { SpamSettings } from './SpamSettings';
 import { RateLimitSettings } from './RateLimitSettings';
+import { useLicense } from '../../ee/hooks/useLicense';
+import { LockedSection } from '../../ee/components/LockedSection';
+import { ProBadge } from '../../ee/components/ProBadge';
 
 export interface FormSettingsProps {
   settings: Partial<FormSettingsType>;
   successMessage: string;
   redirectUrl: string;
   showResetButton: boolean;
+  /**
+   * Top-level `Form.requiresApproval` (NOT a `settings` key) — threaded
+   * explicitly so it round-trips through the form save path.
+   */
+  requiresApproval: boolean;
   onSettingsChange: (settings: Partial<FormSettingsType>) => void;
   onSuccessMessageChange: (value: string) => void;
   onRedirectUrlChange: (value: string) => void;
   onShowResetButtonChange: (value: boolean) => void;
+  onRequiresApprovalChange: (value: boolean) => void;
 }
 
 /**
@@ -52,21 +61,25 @@ const MonospaceTextarea = styled(Textarea)`
 `;
 
 /**
- * A titled settings section rendered inside a native card container.
+ * A titled settings section rendered inside a native card container. An optional
+ * `badge` (e.g. a <ProBadge>) is rendered next to the title.
  */
 const SettingsSection = ({
   title,
+  badge,
   children,
 }: {
   title: string;
+  badge?: React.ReactNode;
   children: React.ReactNode;
 }) => (
   <Box>
-    <Box marginBottom={4}>
+    <Flex marginBottom={4} gap={2} alignItems="center">
       <Typography variant="delta" fontWeight="bold">
         {title}
       </Typography>
-    </Box>
+      {badge}
+    </Flex>
     {children}
   </Box>
 );
@@ -81,12 +94,18 @@ export const FormSettings = ({
   successMessage,
   redirectUrl,
   showResetButton,
+  requiresApproval,
   onSettingsChange,
   onSuccessMessageChange,
   onRedirectUrlChange,
   onShowResetButtonChange,
+  onRequiresApprovalChange,
 }: FormSettingsProps) => {
   const { formatMessage } = useIntl();
+  const { can } = useLicense();
+  const multistepEntitled = can('multistep');
+  const whiteLabelEntitled = can('whiteLabel');
+  const approvalEntitled = can('approval');
 
   // Update a single setting property
   const updateSetting = useCallback(
@@ -176,6 +195,34 @@ export const FormSettings = ({
                   onRedirectUrlChange(e.target.value)
                 }
               />
+              <Field.Hint />
+            </Field.Root>
+
+            {/* Approval workflow (Business). `requiresApproval` is a top-level
+                Form field, not a settings key — toggled via its own handler. */}
+            <Field.Root
+              name="requiresApproval"
+              hint={formatMessage({
+                id: getTranslation('settings.requiresApproval.hint'),
+                defaultMessage:
+                  'Hold new submissions for manual approval before they count as processed.',
+              })}
+            >
+              <Flex gap={2} alignItems="center">
+                <Checkbox
+                  checked={requiresApproval}
+                  disabled={!approvalEntitled}
+                  onCheckedChange={(checked: boolean | 'indeterminate') =>
+                    onRequiresApprovalChange(checked === true)
+                  }
+                >
+                  {formatMessage({
+                    id: getTranslation('settings.requiresApproval.label'),
+                    defaultMessage: 'Require approval for new submissions',
+                  })}
+                </Checkbox>
+                {!approvalEntitled && <ProBadge tier="business" />}
+              </Flex>
               <Field.Hint />
             </Field.Root>
           </Flex>
@@ -281,9 +328,12 @@ export const FormSettings = ({
               </Field.Label>
               <SingleSelect
                 value={settings.layout || 'single'}
-                onChange={(value: string | number) =>
-                  updateSetting('layout', value as 'single' | 'multi-step')
-                }
+                onChange={(value: string | number) => {
+                  if (value === 'multi-step' && !multistepEntitled) {
+                    return;
+                  }
+                  updateSetting('layout', value as 'single' | 'multi-step');
+                }}
               >
                 <SingleSelectOption value="single">
                   {formatMessage({
@@ -296,6 +346,12 @@ export const FormSettings = ({
                     id: getTranslation('settings.layout.multiStep'),
                     defaultMessage: 'Multi-step',
                   })}
+                  {!multistepEntitled && (
+                    <>
+                      {' '}
+                      <ProBadge tier="pro" />
+                    </>
+                  )}
                 </SingleSelectOption>
               </SingleSelect>
               <Field.Hint />
@@ -330,39 +386,42 @@ export const FormSettings = ({
         <Divider />
 
         {/* Custom CSS Section */}
-        <SettingsSection
-          title={formatMessage({
-            id: getTranslation('settings.customCss.title'),
-            defaultMessage: 'Custom CSS',
-          })}
-        >
-          <Field.Root
-            name="customCss"
-            hint={formatMessage({
-              id: getTranslation('settings.customCss.hint'),
-              defaultMessage:
-                'Exposed in the public form schema and injected by the consuming frontend when rendering this form. Not applied inside the admin panel.',
+        <LockedSection can={whiteLabelEntitled} feature="whiteLabel" mode="readonly">
+          <SettingsSection
+            title={formatMessage({
+              id: getTranslation('settings.customCss.title'),
+              defaultMessage: 'Custom CSS',
             })}
+            badge={!whiteLabelEntitled ? <ProBadge tier="pro" /> : undefined}
           >
-            <Field.Label>
-              {formatMessage({
-                id: getTranslation('settings.customCss.label'),
-                defaultMessage: 'Custom CSS',
+            <Field.Root
+              name="customCss"
+              hint={formatMessage({
+                id: getTranslation('settings.customCss.hint'),
+                defaultMessage:
+                  'Exposed in the public form schema and injected by the consuming frontend when rendering this form. Not applied inside the admin panel.',
               })}
-            </Field.Label>
-            <MonospaceTextarea
-              value={settings.customCss || ''}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                updateSetting('customCss', e.target.value)
-              }
-              placeholder={formatMessage({
-                id: getTranslation('settings.customCss.placeholder'),
-                defaultMessage: '.my-form { /* your styles */ }',
-              })}
-            />
-            <Field.Hint />
-          </Field.Root>
-        </SettingsSection>
+            >
+              <Field.Label>
+                {formatMessage({
+                  id: getTranslation('settings.customCss.label'),
+                  defaultMessage: 'Custom CSS',
+                })}
+              </Field.Label>
+              <MonospaceTextarea
+                value={settings.customCss || ''}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  updateSetting('customCss', e.target.value)
+                }
+                placeholder={formatMessage({
+                  id: getTranslation('settings.customCss.placeholder'),
+                  defaultMessage: '.my-form { /* your styles */ }',
+                })}
+              />
+              <Field.Hint />
+            </Field.Root>
+          </SettingsSection>
+        </LockedSection>
       </Flex>
     </Box>
   );
