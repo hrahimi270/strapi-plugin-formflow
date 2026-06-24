@@ -125,7 +125,7 @@ interface RecaptchaVerifyResponse {
 /**
  * spam-check middleware factory
  *
- * Runs on POST /api/forms/:slug/submit BEFORE the submission controller.
+ * Runs on POST /api/formflow/forms/:slug/submit BEFORE the submission controller.
  * Handles two spam defenses, keeping the submission service focused on
  * validate + store + hooks:
  *

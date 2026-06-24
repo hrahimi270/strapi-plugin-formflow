@@ -36,12 +36,13 @@ export const API = {
   // Field Types
   fieldTypes: `/${PLUGIN_ID}/field-types`,
 
-  // Save & resume (Pro). These are PUBLIC content-api endpoints (under /api/),
-  // not plugin admin routes, so they intentionally do not use PLUGIN_ID. The
-  // server gates them with a 402 when the license is not entitled.
-  savePartialForm: (slug: string) => `/api/forms/${slug}/partial`,
+  // Save & resume (Pro). These are PUBLIC content-api endpoints, served under
+  // the `/api/${PLUGIN_ID}/forms/...` content-api prefix (NOT the admin plugin
+  // routes the helpers above use). The server gates them with a 402 when the
+  // license is not entitled.
+  savePartialForm: (slug: string) => `/api/${PLUGIN_ID}/forms/${slug}/partial`,
   getPartialForm: (slug: string, resumeToken: string) =>
-    `/api/forms/${slug}/partial/${resumeToken}`,
+    `/api/${PLUGIN_ID}/forms/${slug}/partial/${resumeToken}`,
 } as const;
 
 /**
@@ -729,7 +730,7 @@ export interface ScheduledExportConfig {
 }
 
 /**
- * Result returned by the save-partial endpoint (POST /api/forms/:slug/partial).
+ * Result returned by the save-partial endpoint (POST /api/formflow/forms/:slug/partial).
  * Requires a Pro license (saveResume feature).
  */
 export interface SavePartialResult {
@@ -738,7 +739,7 @@ export interface SavePartialResult {
 }
 
 /**
- * Saved partial submission data returned by GET /api/forms/:slug/partial/:resumeToken.
+ * Saved partial submission data returned by GET /api/formflow/forms/:slug/partial/:resumeToken.
  */
 export interface PartialSubmissionData {
   data: Record<string, unknown>;

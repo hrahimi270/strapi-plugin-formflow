@@ -78,7 +78,7 @@ const isPaymentRequiredError = (error: unknown): error is PaymentRequiredError =
 const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
   /**
    * Get form schema for frontend rendering
-   * GET /api/forms/:slug
+   * GET /api/formflow/forms/:slug
    *
    * Returns the public-safe portions of a form configuration
    * for frontend applications to dynamically render forms.
@@ -123,7 +123,7 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Submit form data
-   * POST /api/forms/:slug/submit
+   * POST /api/formflow/forms/:slug/submit
    *
    * Validates and processes form submissions, storing them in the database.
    * Handles spam detection, validation errors, and returns appropriate responses.
@@ -316,7 +316,7 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Save a partial submission (save & resume)
-   * POST /api/forms/:slug/partial
+   * POST /api/formflow/forms/:slug/partial
    *
    * Persists incomplete form data under a `draft` status and returns a resume
    * token the frontend stores and replays (via the `_resumeToken` body field) to
@@ -401,7 +401,7 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Resume a saved partial submission
-   * GET /api/forms/:slug/partial/:resumeToken
+   * GET /api/formflow/forms/:slug/partial/:resumeToken
    *
    * Returns the previously-saved partial data + metadata for a resume token.
    * Save & resume is a Pro feature; when unentitled the service throws a 402
@@ -469,7 +469,7 @@ const publicController = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   /**
    * Health check endpoint for form API
-   * GET /api/forms
+   * GET /api/formflow
    *
    * Returns a simple status response to verify the API is running.
    */
