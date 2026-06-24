@@ -102,14 +102,31 @@ function parseDate(value: string | null | undefined): Date | null {
 }
 
 /**
- * POST JSON to a MoR endpoint with a hard abort timeout. Returns the parsed JSON
- * body or `null` on any failure (network, abort, non-2xx, parse). Never throws.
+ * Outcome of a single MoR HTTP call. Distinguishes the three cases the license
+ * grace logic depends on:
+ *   - `ok`: a 2xx response with a parsed JSON body.
+ *   - `client-error`: a definitive 4xx response — the MoR was reachable and is
+ *     telling us the key/instance is invalid/not-found/disabled. NOT a
+ *     connectivity failure: callers must treat this as a hard, definitive answer.
+ *   - `connectivity`: a thrown fetch error, timeout/abort, 5xx server error, or
+ *     a JSON parse failure — we could not get a definitive answer from the MoR.
+ */
+type MorOutcome =
+  | { kind: 'ok'; json: any }
+  | { kind: 'client-error'; httpStatus: number }
+  | { kind: 'connectivity' };
+
+/**
+ * POST JSON to a MoR endpoint with a hard abort timeout. Never throws; instead
+ * returns a typed {@link MorOutcome} so callers can distinguish a definitive
+ * client-side rejection (4xx) from a transient connectivity failure (network,
+ * abort, 5xx, parse error).
  */
 async function morFetch(
   provider: MorProvider,
   url: string,
   body: Record<string, unknown>
-): Promise<any | null> {
+): Promise<MorOutcome> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), MOR_TIMEOUT_MS);
 
@@ -136,14 +153,20 @@ async function morFetch(
 
     if (!response.ok) {
       console.warn(`[FormFlow License] MoR request to ${url} returned HTTP ${response.status}`);
-      return null;
+      // A 4xx is a DEFINITIVE answer from a reachable MoR (key/instance invalid,
+      // not found, disabled). A 5xx is a transient server-side failure and is
+      // treated as connectivity loss so it never nukes a valid entitlement.
+      if (response.status >= 400 && response.status < 500) {
+        return { kind: 'client-error', httpStatus: response.status };
+      }
+      return { kind: 'connectivity' };
     }
 
-    return await response.json();
+    return { kind: 'ok', json: await response.json() };
   } catch (error) {
     clearTimeout(timeoutId);
     console.error(`[FormFlow License] MoR request to ${url} failed:`, error);
-    return null;
+    return { kind: 'connectivity' };
   }
 }
 
@@ -155,12 +178,19 @@ export async function activate(params: MorActivateParams): Promise<MorActivateRe
   const provider = params.provider ?? DEFAULT_PROVIDER;
   const base = ENDPOINTS[provider];
 
-  const json = await morFetch(provider, `${base}/activate`, {
+  const outcome = await morFetch(provider, `${base}/activate`, {
     license_key: params.licenseKey,
     instance_name: params.instanceName,
   });
 
-  if (!json || json.activated !== true || !json.instance?.id) {
+  // Activation only succeeds on a 2xx body that confirms activation. Any
+  // connectivity failure OR definitive client-error is a failed activation.
+  if (outcome.kind !== 'ok') {
+    return null;
+  }
+  const json = outcome.json;
+
+  if (json.activated !== true || !json.instance?.id) {
     return null;
   }
 
@@ -172,10 +202,17 @@ export async function activate(params: MorActivateParams): Promise<MorActivateRe
 }
 
 /**
- * Validate a license key (optionally against a known instance id). Never throws:
- * any network/parse/non-2xx failure resolves to a typed failure result with
- * `status: 'error'` so the caller can distinguish connectivity loss from an
- * explicit revocation (`valid: false`).
+ * Validate a license key (optionally against a known instance id). Never throws.
+ *
+ * Returns `status: 'error'` ONLY for a genuine connectivity failure (network,
+ * timeout/abort, 5xx, parse error) — the caller maps that to the grace window.
+ *
+ * A definitive 4xx from a reachable MoR (e.g. a deactivated/stale instance_id →
+ * 404, or a malformed/unknown key → 400/403) resolves to `valid: false` with a
+ * NON-'error' status (`not_found` / `invalid` / `disabled`) so the caller
+ * hard-expires it immediately, with NO grace. A 2xx body is parsed as before:
+ * `valid` requires `json.valid === true && license_key.status === 'active'`, so
+ * a 200 reporting an inactive/expired key still hard-expires.
  */
 export async function validate(params: MorValidateParams): Promise<MorValidateResult> {
   const provider = params.provider ?? DEFAULT_PROVIDER;
@@ -186,12 +223,28 @@ export async function validate(params: MorValidateParams): Promise<MorValidateRe
     body.instance_id = params.instanceId;
   }
 
-  const json = await morFetch(provider, `${base}/validate`, body);
+  const outcome = await morFetch(provider, `${base}/validate`, body);
 
-  if (!json) {
+  // (a) Connectivity failure: the ONLY case that yields 'error' → grace window.
+  if (outcome.kind === 'connectivity') {
     return { valid: false, tier: 'free', validUntil: null, status: 'error' };
   }
 
+  // (b) Definitive 4xx: MoR reachable and rejecting the key/instance. Hard-expire
+  // via valid:false, but with a non-'error' status so it is NOT mistaken for a
+  // connectivity loss. Map the HTTP status to a descriptive license status.
+  if (outcome.kind === 'client-error') {
+    const status =
+      outcome.httpStatus === 404
+        ? 'not_found'
+        : outcome.httpStatus === 403
+          ? 'disabled'
+          : 'invalid';
+    return { valid: false, tier: 'free', validUntil: null, status };
+  }
+
+  // (c) 2xx body: parse as before. `valid` requires an explicitly active key.
+  const json = outcome.json;
   const status = String(json.license_key?.status ?? 'unknown');
   const valid = json.valid === true && status === 'active';
 
