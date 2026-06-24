@@ -2,9 +2,9 @@
 
 **The dynamic, headless form builder for Strapi v5.**
 
-[![npm version](https://img.shields.io/npm/v/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/strapi-plugin-formflow)
-[![npm downloads](https://img.shields.io/npm/dm/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/strapi-plugin-formflow)
-[![license](https://img.shields.io/npm/l/strapi-plugin-formflow.svg)](./LICENSE)
+[![npm version](https://img.shields.io/npm/v/@formflowjs/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/@formflowjs/strapi-plugin-formflow)
+[![npm downloads](https://img.shields.io/npm/dm/@formflowjs/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/@formflowjs/strapi-plugin-formflow)
+[![license](https://img.shields.io/npm/l/@formflowjs/strapi-plugin-formflow.svg)](./LICENSE)
 [![Strapi v5](https://img.shields.io/badge/Strapi-v5-4945FF.svg)](https://strapi.io)
 
 FormFlow lets you build configurable forms visually in the Strapi admin panel and consume them over a clean REST API from **any** frontend. Forms, fields, validation, spam protection, notifications, and submissions all live in Strapi — your frontend just fetches the schema and posts the values. Truly headless: bring your own framework, your own styling, your own UX.
@@ -89,10 +89,10 @@ A drag-and-drop form builder with a rich field registry:
 
 ```bash
 # npm
-npm install strapi-plugin-formflow
+npm install @formflowjs/strapi-plugin-formflow
 
 # yarn
-yarn add strapi-plugin-formflow
+yarn add @formflowjs/strapi-plugin-formflow
 ```
 
 Enable the plugin in `config/plugins.ts` (or `config/plugins.js`):
