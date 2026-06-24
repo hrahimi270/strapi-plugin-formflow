@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Core } from '@strapi/strapi';
 
@@ -12,6 +12,9 @@ const STORE_PARAMS = { type: 'plugin', name: 'formflow' } as const;
 const CACHE_KEY = 'license-cache';
 const INSTANCE_ID_KEY = 'license-instance-id';
 const INSTANCE_NAME_KEY = 'license-instance-name';
+// sha256 of the configured key — lets us detect a key change (Pro→Business or a
+// regenerated key) across boots WITHOUT ever persisting the raw key.
+const KEY_HASH_KEY = 'license-key-hash';
 const DEFAULT_GRACE_DAYS = 14;
 const DAY_MS = 86_400_000;
 
@@ -75,6 +78,11 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
 
   function readLicenseKey(): string {
     return readConfig().license?.key ?? '';
+  }
+
+  /** sha256 hex of the configured key — persisted instead of the raw key. */
+  function hashKey(licenseKey: string): string {
+    return createHash('sha256').update(licenseKey).digest('hex');
   }
 
   /**
@@ -145,6 +153,9 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
       if (result) {
         _instanceId = result.instanceId;
         await store().set({ key: INSTANCE_ID_KEY, value: result.instanceId });
+        // Bind the persisted hash to the key we just activated, so a same-key
+        // reboot matches and skips the reset path in init().
+        await store().set({ key: KEY_HASH_KEY, value: hashKey(licenseKey) });
         strapi.log.info('[FormFlow License] License key activated.');
       }
     } catch (error) {
@@ -232,6 +243,10 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
         graceUntil: new Date(now.getTime() + graceDays * DAY_MS),
       };
       await persistCache(_cache);
+      // Persist the key hash on a successful validation too: the key may have been
+      // activated on a previous boot (so ensureActivated short-circuited) — this
+      // guarantees a same-key reboot matches and avoids a needless reset.
+      await store().set({ key: KEY_HASH_KEY, value: hashKey(licenseKey) });
       _tier = result.tier;
       _state = 'active';
     } catch (error) {
@@ -248,25 +263,64 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
         return;
       }
 
-      // Rehydrate the persisted cache so grace state survives a restart.
+      // Detect a CHANGED key. The persisted instance-id is bound to whatever key
+      // was last activated; if the configured key is now different (Pro→Business
+      // upgrade or a regenerated key), validating the NEW key against the OLD
+      // instance-id makes the MoR return 404 → the revocation path would wrongly
+      // hard-expire a perfectly valid key. So a mismatch is a NEW key, NOT a
+      // revocation: drop the stale binding/cache so activate-on-first-boot runs
+      // fresh for the new key. A genuine revocation of the SAME key keeps the
+      // binding and is hard-expired by refresh() as before.
+      let keyChanged = false;
       try {
-        const raw = (await store().get({ key: CACHE_KEY })) as Record<string, any> | null;
-        if (raw) {
-          _cache = {
-            tier: raw.tier,
-            status: raw.status,
-            validUntil: raw.validUntil ? new Date(raw.validUntil) : null,
-            lastValidatedAt: new Date(raw.lastValidatedAt),
-            graceUntil: new Date(raw.graceUntil),
-          };
-        }
-
-        const instanceId = (await store().get({ key: INSTANCE_ID_KEY })) as string | null;
-        if (instanceId) {
-          _instanceId = instanceId;
-        }
+        const persistedHash = (await store().get({ key: KEY_HASH_KEY })) as string | null;
+        const currentHash = hashKey(licenseKey);
+        const hasStaleBinding =
+          !!(await store().get({ key: INSTANCE_ID_KEY })) ||
+          !!(await store().get({ key: CACHE_KEY }));
+        // Mismatch, or no hash recorded yet while a stale binding/cache exists
+        // (e.g. upgraded from a build that predated key-hash persistence).
+        keyChanged = persistedHash
+          ? persistedHash !== currentHash
+          : hasStaleBinding;
       } catch (error) {
-        strapi.log.warn('[FormFlow License] Failed to load persisted cache:', error);
+        strapi.log.warn('[FormFlow License] Failed to read persisted key hash:', error);
+      }
+
+      if (keyChanged) {
+        try {
+          await store().delete({ key: INSTANCE_ID_KEY });
+          await store().delete({ key: INSTANCE_NAME_KEY });
+          await store().delete({ key: CACHE_KEY });
+        } catch (error) {
+          strapi.log.warn('[FormFlow License] Failed to clear stale license binding:', error);
+        }
+        _instanceId = null;
+        _cache = null;
+        strapi.log.info(
+          '[FormFlow License] Configured license key changed — reset stale binding; re-activating for the new key.'
+        );
+      } else {
+        // Same key: rehydrate the persisted cache so grace state survives a restart.
+        try {
+          const raw = (await store().get({ key: CACHE_KEY })) as Record<string, any> | null;
+          if (raw) {
+            _cache = {
+              tier: raw.tier,
+              status: raw.status,
+              validUntil: raw.validUntil ? new Date(raw.validUntil) : null,
+              lastValidatedAt: new Date(raw.lastValidatedAt),
+              graceUntil: new Date(raw.graceUntil),
+            };
+          }
+
+          const instanceId = (await store().get({ key: INSTANCE_ID_KEY })) as string | null;
+          if (instanceId) {
+            _instanceId = instanceId;
+          }
+        } catch (error) {
+          strapi.log.warn('[FormFlow License] Failed to load persisted cache:', error);
+        }
       }
 
       // Apply the last-known entitlement SYNCHRONOUSLY from the rehydrated cache so
