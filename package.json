@@ -1,6 +1,12 @@
 {
   "version": "1.0.0",
-  "keywords": ["strapi", "strapi-plugin", "forms", "formflow", "form-builder"],
+  "keywords": [
+    "strapi",
+    "strapi-plugin",
+    "forms",
+    "formflow",
+    "form-builder"
+  ],
   "type": "commonjs",
   "exports": {
     "./package.json": "./package.json",
@@ -31,7 +37,10 @@
     "test:ts:front": "run -T tsc -p admin/tsconfig.json",
     "test:ts:back": "run -T tsc -p server/tsconfig.json",
     "test:unit": "tsc server/src/ee/license/__tests__/no-key-submission.test.ts --rootDir . --outDir /tmp/sf-test-out --module commonjs --target es2020 --moduleResolution node --esModuleInterop --skipLibCheck && node /tmp/sf-test-out/server/src/ee/license/__tests__/no-key-submission.test.js",
-    "prepublishOnly": "npm run build && npm run verify"
+    "prepublishOnly": "npm run build && npm run verify",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish"
   },
   "dependencies": {
     "pdfkit": "^0.15.0",
@@ -39,6 +48,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@strapi/design-system": "^2.0.0-rc.30",
     "@strapi/icons": "^2.0.0-rc.30",
     "@strapi/sdk-plugin": "^5.4.0",

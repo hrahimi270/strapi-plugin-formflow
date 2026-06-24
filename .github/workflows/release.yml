@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write       # let Changesets push the "Version Packages" PR + git tags
+  pull-requests: write  # let Changesets open/update that PR
+  id-token: write       # OIDC: tokenless npm publish + automatic provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # >= 22.14 required for npm OIDC trusted publishing
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted publishing requires npm >= 11.5.1 (newer than the bundled version).
+      - name: Ensure OIDC-capable npm
+        run: npm install -g npm@latest
+
+      - run: npm ci
+
+      # Pending changesets -> opens/updates the "Version Packages" PR.
+      # No pending changesets (that PR was merged) -> builds and publishes to npm
+      # via OIDC trusted publishing. No NPM_TOKEN needed; provenance is automatic.
+      - name: Create Release PR or publish
+        uses: changesets/action@v1
+        with:
+          version: npm run version-packages
+          publish: npm run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
