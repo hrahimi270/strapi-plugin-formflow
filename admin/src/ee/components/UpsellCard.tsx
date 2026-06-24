@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
+/* SPDX-License-Identifier: LicenseRef-FormFlow-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 import { Box, Flex, Typography, LinkButton } from '@strapi/design-system';
 
 import { type FeatureKey } from '../feature-map';

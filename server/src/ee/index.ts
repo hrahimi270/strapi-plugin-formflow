@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
+/* SPDX-License-Identifier: LicenseRef-FormFlow-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 export * from './feature-map';
 
 // EE sentinel — T18 greps dist/ for this string to verify the barrel bundled.

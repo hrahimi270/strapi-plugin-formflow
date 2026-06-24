@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
+/* SPDX-License-Identifier: LicenseRef-FormFlow-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 
 /**
  * Cloudflare Turnstile / hCaptcha siteverify endpoints. Both speak the same

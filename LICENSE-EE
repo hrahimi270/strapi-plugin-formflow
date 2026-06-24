@@ -36,7 +36,7 @@ real data, or supports any business operations beyond evaluation.
 
 To use FormFlow Pro or Business features in production:
 1. Purchase a license at the official FormFlow store (TBD-before-launch).
-2. Set the environment variable `STRAPI_FORMS_LICENSE_KEY=<your_key>` in the
+2. Set the environment variable `FORMFLOW_LICENSE_KEY=<your_key>` in the
    host Strapi project's `.env` file.
 3. Restart the Strapi server.
 
@@ -106,7 +106,7 @@ Violation of the restrictions above constitutes the express legal basis for:
   bundle or embed ee/ code in violation of this license.
 - Any other civil or legal remedies available under applicable copyright law.
 
-Per-file SPDX headers (`/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE ...
+Per-file SPDX headers (`/* SPDX-License-Identifier: LicenseRef-FormFlow-EE ...
 */`) make the commercial status of every ee/ file unambiguous in any copied file,
 facilitating identification and enforcement.
 

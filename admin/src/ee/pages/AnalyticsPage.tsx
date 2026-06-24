@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
+/* SPDX-License-Identifier: LicenseRef-FormFlow-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 import { Box, Grid, Flex, Typography, Loader } from '@strapi/design-system';
 import { Page, Layouts, BackButton } from '@strapi/strapi/admin';
 import { useIntl } from 'react-intl';

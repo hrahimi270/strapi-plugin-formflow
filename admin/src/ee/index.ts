@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
+/* SPDX-License-Identifier: LicenseRef-FormFlow-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 export * from './feature-map';
 
 export const __EE_ADMIN__ = '__EE_ADMIN__'; // sentinel for T18 dist grep — string so it survives DCE via LicenseContext.displayName

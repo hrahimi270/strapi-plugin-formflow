@@ -1,7 +1,7 @@
-/* SPDX-License-Identifier: LicenseRef-StrapiForms-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
+/* SPDX-License-Identifier: LicenseRef-FormFlow-EE — Commercial. See LICENSE-EE. Not covered by MIT. */
 
 /**
- * Phase-0 regression test: submissions persist with STRAPI_FORMS_LICENSE_KEY unset.
+ * Phase-0 regression test: submissions persist with FORMFLOW_LICENSE_KEY unset.
  *
  * Run via: npm run test:unit
  *

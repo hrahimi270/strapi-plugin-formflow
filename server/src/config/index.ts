@@ -37,7 +37,7 @@ export interface FormFlowConfig {
   license: {
     /**
      * License key obtained from the Merchant-of-Record after purchase.
-     * Set via STRAPI_FORMS_LICENSE_KEY env var. Empty string = free tier.
+     * Set via FORMFLOW_LICENSE_KEY env var. Empty string = free tier.
      * SERVER-ONLY: never returned in public API responses or the /license snapshot.
      */
     key: string;
@@ -71,8 +71,8 @@ export default {
     anonymizeIp: false,
     dataRetentionDays: 0,
     license: {
-      key: process.env.STRAPI_FORMS_LICENSE_KEY ?? '',
-      graceDays: Number(process.env.STRAPI_FORMS_LICENSE_GRACE_DAYS ?? 14),
+      key: process.env.FORMFLOW_LICENSE_KEY ?? '',
+      graceDays: Number(process.env.FORMFLOW_LICENSE_GRACE_DAYS ?? 14),
       // Default to Lemon Squeezy; only the explicit `polar` value switches.
       provider:
         process.env.MOR_PROVIDER === 'polar'
