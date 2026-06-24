@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Strapi Forms is a Strapi v5 plugin for creating dynamic, configurable forms through the admin panel. It follows a headless CMS architecture where forms are managed in Strapi and consumed via REST API by any frontend.
+FormFlow is a Strapi v5 plugin for creating dynamic, configurable forms through the admin panel. It follows a headless CMS architecture where forms are managed in Strapi and consumed via REST API by any frontend.
 
 **Key Reference**: See `architecture.md` for detailed implementation plans, data models, and API designs.
 
@@ -38,8 +38,8 @@ Backend plugin code running in Node.js:
 - **controllers/**: Request handlers (form CRUD, submission handling, public API)
 - **services/**: Business logic (form, submission, validation, export services)
 - **routes/**: Two route types:
-  - `admin/`: Protected routes for admin panel (`/strapi-forms/*`)
-  - `content-api/`: Public routes for frontend (`/api/forms/*`)
+  - `admin/`: Protected routes for admin panel (`/formflow/*`)
+  - `content-api/`: Public routes for frontend (`/api/formflow/forms/*`)
 - **policies/**: Route guards (is-form-active, rate-limit)
 - **middlewares/**: Request processing (spam-check)
 
@@ -56,13 +56,13 @@ React frontend for Strapi admin panel:
 Use `strapi.documents()` for database operations:
 ```typescript
 // Find
-await strapi.documents('plugin::strapi-forms.form').findMany({ filters: { slug } });
+await strapi.documents('plugin::formflow.form').findMany({ filters: { slug } });
 
 // Create
-await strapi.documents('plugin::strapi-forms.form').create({ data: {...} });
+await strapi.documents('plugin::formflow.form').create({ data: {...} });
 
 // Update
-await strapi.documents('plugin::strapi-forms.form').update({ documentId, data: {...} });
+await strapi.documents('plugin::formflow.form').update({ documentId, data: {...} });
 ```
 
 ### Admin API Calls
@@ -97,12 +97,12 @@ export default myController;
 ## Content Types
 
 Plugin defines two collection types hidden from Content Manager:
-- `plugin::strapi-forms.form`: Form definitions with JSON fields for `fields` and `settings`
-- `plugin::strapi-forms.form-submission`: Submission data with relation to form
+- `plugin::formflow.form`: Form definitions with JSON fields for `fields` and `settings`
+- `plugin::formflow.form-submission`: Submission data with relation to form
 
 ## Route Structure
 
 | Type | Base Path | Auth | Purpose |
 |------|-----------|------|---------|
-| Admin | `/strapi-forms/` | Admin session | Form/submission management |
-| Content API | `/api/forms/` | Public (configurable) | Schema retrieval, form submission |
+| Admin | `/formflow/` | Admin session | Form/submission management |
+| Content API | `/api/formflow/forms/` | Public (configurable) | Schema retrieval, form submission |

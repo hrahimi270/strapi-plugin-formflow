@@ -1,4 +1,4 @@
-# Strapi Forms Plugin - Architecture Document
+# FormFlow Plugin - Architecture Document
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@
 
 ## Overview
 
-**Strapi Forms** is a Strapi v5 plugin that enables administrators to create dynamic, configurable forms through the admin panel. Unlike traditional form builders, this plugin is designed for headless CMS architectures where:
+**FormFlow** is a Strapi v5 plugin that enables administrators to create dynamic, configurable forms through the admin panel. Unlike traditional form builders, this plugin is designed for headless CMS architectures where:
 
 - Forms are defined and managed in Strapi admin
 - Form schemas are exposed via API endpoints for frontend consumption
@@ -164,7 +164,7 @@ Stores individual form submissions.
     "form": {
       "type": "relation",
       "relation": "manyToOne",
-      "target": "plugin::strapi-forms.form",
+      "target": "plugin::formflow.form",
       "inversedBy": "submissions"
     },
     "data": {
@@ -341,7 +341,7 @@ server/src/
 
 ### Routes
 
-#### Admin Routes (`/strapi-forms/`)
+#### Admin Routes (`/formflow/`)
 
 ```typescript
 // server/src/routes/admin/index.ts
@@ -437,7 +437,7 @@ export default {
 };
 ```
 
-#### Content API Routes (`/api/strapi-forms/forms/`)
+#### Content API Routes (`/api/formflow/forms/`)
 
 ```typescript
 // server/src/routes/content-api/index.ts
@@ -450,7 +450,7 @@ export default {
       path: '/forms/:slug',
       handler: 'public.getFormSchema',
       config: {
-        policies: ['plugin::strapi-forms.is-form-active'],
+        policies: ['plugin::formflow.is-form-active'],
         auth: false  // Public by default, can be configured
       }
     },
@@ -462,10 +462,10 @@ export default {
       handler: 'public.submitForm',
       config: {
         policies: [
-          'plugin::strapi-forms.is-form-active',
-          'plugin::strapi-forms.rate-limit'
+          'plugin::formflow.is-form-active',
+          'plugin::formflow.rate-limit'
         ],
-        middlewares: ['plugin::strapi-forms.spam-check'],
+        middlewares: ['plugin::formflow.spam-check'],
         auth: false
       }
     }
@@ -484,7 +484,7 @@ import type { Core } from '@strapi/strapi';
 const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
   async find(ctx) {
     const forms = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .find(ctx.query);
 
@@ -494,7 +494,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
   async findOne(ctx) {
     const { id } = ctx.params;
     const form = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .findOne(id);
 
@@ -508,7 +508,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
   async create(ctx) {
     const data = ctx.request.body;
     const form = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .create(data);
 
@@ -519,7 +519,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
     const { id } = ctx.params;
     const data = ctx.request.body;
     const form = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .update(id, data);
 
@@ -529,7 +529,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
   async delete(ctx) {
     const { id } = ctx.params;
     await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .delete(id);
 
@@ -539,7 +539,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
   async duplicate(ctx) {
     const { id } = ctx.params;
     const form = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .duplicate(id);
 
@@ -548,7 +548,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async getFieldTypes(ctx) {
     const fieldTypes = strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .getFieldTypes();
 
@@ -570,7 +570,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
     const { slug } = ctx.params;
 
     const schema = await strapi
-      .plugin('strapi-forms')
+      .plugin('formflow')
       .service('form')
       .getPublicSchema(slug);
 
@@ -595,7 +595,7 @@ const controller = ({ strapi }: { strapi: Core.Strapi }) => ({
 
     try {
       const result = await strapi
-        .plugin('strapi-forms')
+        .plugin('formflow')
         .service('submission')
         .submit(slug, submissionData, metadata);
 
@@ -629,20 +629,20 @@ import { v4 as uuidv4 } from 'uuid';
 
 const service = ({ strapi }: { strapi: Core.Strapi }) => ({
   async find(query = {}) {
-    return strapi.documents('plugin::strapi-forms.form').findMany({
+    return strapi.documents('plugin::formflow.form').findMany({
       ...query,
       populate: ['submissions']
     });
   },
 
   async findOne(documentId: string) {
-    return strapi.documents('plugin::strapi-forms.form').findOne({
+    return strapi.documents('plugin::formflow.form').findOne({
       documentId
     });
   },
 
   async findBySlug(slug: string) {
-    const forms = await strapi.documents('plugin::strapi-forms.form').findMany({
+    const forms = await strapi.documents('plugin::formflow.form').findMany({
       filters: { slug }
     });
     return forms[0] || null;
@@ -658,7 +658,7 @@ const service = ({ strapi }: { strapi: Core.Strapi }) => ({
       }));
     }
 
-    return strapi.documents('plugin::strapi-forms.form').create({
+    return strapi.documents('plugin::formflow.form').create({
       data: {
         ...data,
         settings: data.settings || this.getDefaultSettings()
@@ -667,7 +667,7 @@ const service = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   async update(documentId: string, data: any) {
-    return strapi.documents('plugin::strapi-forms.form').update({
+    return strapi.documents('plugin::formflow.form').update({
       documentId,
       data
     });
@@ -675,17 +675,17 @@ const service = ({ strapi }: { strapi: Core.Strapi }) => ({
 
   async delete(documentId: string) {
     // Delete all associated submissions first
-    const submissions = await strapi.documents('plugin::strapi-forms.form-submission').findMany({
+    const submissions = await strapi.documents('plugin::formflow.form-submission').findMany({
       filters: { form: { documentId } }
     });
 
     for (const submission of submissions) {
-      await strapi.documents('plugin::strapi-forms.form-submission').delete({
+      await strapi.documents('plugin::formflow.form-submission').delete({
         documentId: submission.documentId
       });
     }
 
-    return strapi.documents('plugin::strapi-forms.form').delete({
+    return strapi.documents('plugin::formflow.form').delete({
       documentId
     });
   },
@@ -1034,8 +1034,8 @@ import type { Core } from '@strapi/strapi';
 
 const service = ({ strapi }: { strapi: Core.Strapi }) => ({
   async submit(slug: string, data: Record<string, any>, metadata: any) {
-    const formService = strapi.plugin('strapi-forms').service('form');
-    const validationService = strapi.plugin('strapi-forms').service('validation');
+    const formService = strapi.plugin('formflow').service('form');
+    const validationService = strapi.plugin('formflow').service('validation');
 
     // Get form
     const form = await formService.findBySlug(slug);
@@ -1060,7 +1060,7 @@ const service = ({ strapi }: { strapi: Core.Strapi }) => ({
     const sanitizedData = validationService.sanitize(form.fields, data);
 
     // Create submission
-    const submission = await strapi.documents('plugin::strapi-forms.form-submission').create({
+    const submission = await strapi.documents('plugin::formflow.form-submission').create({
       data: {
         form: form.documentId,
         data: sanitizedData,
@@ -1090,7 +1090,7 @@ const service = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   async find(formId: string, query: any = {}) {
-    return strapi.documents('plugin::strapi-forms.form-submission').findMany({
+    return strapi.documents('plugin::formflow.form-submission').findMany({
       ...query,
       filters: {
         ...query.filters,
@@ -1101,21 +1101,21 @@ const service = ({ strapi }: { strapi: Core.Strapi }) => ({
   },
 
   async findOne(documentId: string) {
-    return strapi.documents('plugin::strapi-forms.form-submission').findOne({
+    return strapi.documents('plugin::formflow.form-submission').findOne({
       documentId,
       populate: ['form']
     });
   },
 
   async update(documentId: string, data: any) {
-    return strapi.documents('plugin::strapi-forms.form-submission').update({
+    return strapi.documents('plugin::formflow.form-submission').update({
       documentId,
       data
     });
   },
 
   async delete(documentId: string) {
-    return strapi.documents('plugin::strapi-forms.form-submission').delete({
+    return strapi.documents('plugin::formflow.form-submission').delete({
       documentId
     });
   },
@@ -1197,12 +1197,12 @@ import type { Core } from '@strapi/strapi';
 
 const service = ({ strapi }: { strapi: Core.Strapi }) => ({
   async exportToCSV(formId: string, options: any = {}): Promise<string> {
-    const form = await strapi.plugin('strapi-forms').service('form').findOne(formId);
+    const form = await strapi.plugin('formflow').service('form').findOne(formId);
     if (!form) {
       throw new Error('Form not found');
     }
 
-    const submissions = await strapi.plugin('strapi-forms').service('submission').find(formId, {
+    const submissions = await strapi.plugin('formflow').service('submission').find(formId, {
       filters: options.filters,
       sort: { createdAt: 'asc' }
     });
@@ -1268,7 +1268,7 @@ export default async (policyContext, config, { strapi }) => {
   const { slug } = policyContext.params;
 
   const form = await strapi
-    .plugin('strapi-forms')
+    .plugin('formflow')
     .service('form')
     .findBySlug(slug);
 
@@ -1298,7 +1298,7 @@ export default async (policyContext, config, { strapi }) => {
   const ip = policyContext.request.ip;
 
   const form = await strapi
-    .plugin('strapi-forms')
+    .plugin('formflow')
     .service('form')
     .findBySlug(slug);
 
@@ -1701,7 +1701,7 @@ export const FormEditPage = () => {
                         onChange={(e) => updateField('slug', e.target.value)}
                         placeholder="contact-form"
                       />
-                      <Field.Hint>Used in API endpoint: /api/strapi-forms/forms/{formData.slug || 'slug'}</Field.Hint>
+                      <Field.Hint>Used in API endpoint: /api/formflow/forms/{formData.slug || 'slug'}</Field.Hint>
                     </Field.Root>
                   </Grid.Item>
                   <Grid.Item col={12}>
@@ -1975,7 +1975,7 @@ export const FormBuilder: React.FC<FormBuilderProps> = ({ fields, onChange }) =>
 #### Get Form Schema
 
 ```
-GET /api/strapi-forms/forms/:slug
+GET /api/formflow/forms/:slug
 ```
 
 **Response:**
@@ -2055,7 +2055,7 @@ GET /api/strapi-forms/forms/:slug
 #### Submit Form
 
 ```
-POST /api/strapi-forms/forms/:slug/submit
+POST /api/formflow/forms/:slug/submit
 Content-Type: application/json
 ```
 
@@ -2366,7 +2366,7 @@ const DynamicForm = ({ formSlug }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/strapi-forms/forms/${formSlug}`)
+    fetch(`/api/formflow/forms/${formSlug}`)
       .then(res => res.json())
       .then(data => {
         setSchema(data.data);
@@ -2387,7 +2387,7 @@ const DynamicForm = ({ formSlug }) => {
     setErrors({});
 
     try {
-      const response = await fetch(`/api/strapi-forms/forms/${formSlug}/submit`, {
+      const response = await fetch(`/api/formflow/forms/${formSlug}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(values)
@@ -2450,4 +2450,4 @@ const DynamicForm = ({ formSlug }) => {
 
 ---
 
-*This architecture document serves as the foundational blueprint for the Strapi Forms plugin. It should be updated as the implementation progresses and requirements evolve.*
+*This architecture document serves as the foundational blueprint for the FormFlow plugin. It should be updated as the implementation progresses and requirements evolve.*

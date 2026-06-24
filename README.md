@@ -1,4 +1,4 @@
-# FormFlow — Strapi Forms Plugin
+# FormFlow — Forms plugin for Strapi
 
 [![npm version](https://img.shields.io/npm/v/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/strapi-plugin-formflow) <!-- TBD-before-launch -->
 [![Strapi Marketplace](https://img.shields.io/badge/Strapi-Marketplace-blueviolet)](https://market.strapi.io/plugins/strapi-plugin-formflow) <!-- TBD-before-launch -->
@@ -65,13 +65,13 @@ No extra database migration is needed — FormFlow creates its own content types
 After purchasing a Pro or Business license from [FormFlow on Lemon Squeezy](https://lemon.squeezy.com/formflow) <!-- TBD-before-launch: replace with real store URL once live -->, set the license key in your Strapi project's `.env` file:
 
 ```
-STRAPI_FORMS_LICENSE_KEY=your_key_here
+FORMFLOW_LICENSE_KEY=your_key_here
 ```
 
 Optionally, override the connectivity-failure grace period (default: 14 days):
 
 ```
-STRAPI_FORMS_LICENSE_GRACE_DAYS=14
+FORMFLOW_LICENSE_GRACE_DAYS=14
 ```
 
 **Behavior notes:**
