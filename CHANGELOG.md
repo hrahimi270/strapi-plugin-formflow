@@ -1,5 +1,11 @@
 # @formflowjs/strapi-plugin-formflow
 
+## 1.0.6
+
+### Patch Changes
+
+- c5f3c1b: Align open-core licensing metadata with Strapi's convention. Declare `"license": "SEE LICENSE IN LICENSE"` in `package.json` (instead of `"MIT"`, which understated the dual-licensed `ee/` code), matching how `@strapi/*` packages do it, and replace the README's auto MIT badge with an honest "Open Core (MIT + EE)" badge. No change to the actual terms — the free core stays MIT and `ee/` stays under `LICENSE-EE` per the root `LICENSE` carve-out.
+
 ## 1.0.5
 
 ### Patch Changes
