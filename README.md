@@ -183,4 +183,9 @@ All public endpoints are mounted under `/api/formflow` and are unauthenticated b
 
 ## License
 
-MIT — see [`LICENSE`](./LICENSE).
+FormFlow is **open-core**:
+
+- The free core — every file **except** those under an `ee/` directory — is licensed under the [MIT License](./LICENSE).
+- The premium **Enterprise Edition** code (under `server/src/ee/` and `admin/src/ee/`, powering the Pro and Business features) is source-available under the [FormFlow EE License](./LICENSE-EE). You may view and evaluate it, but **production use requires a valid license key**.
+
+Pro/Business features are gated at runtime by a license key (`FORMFLOW_LICENSE_KEY`). Without one, FormFlow runs as the fully-functional free tier — your forms and submissions always work.
