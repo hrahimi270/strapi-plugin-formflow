@@ -432,7 +432,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
           ctx.body = {
             error: 'Payment Required',
             message: 'Advanced export (Excel/PDF) requires a Pro license.',
-            upsell: 'https://formflow.dev/pricing',
+            upsell: 'https://hrahimi270.github.io/formflow-website/#pricing',
           };
           return;
         }
@@ -581,7 +581,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
       ctx.body = {
         error: 'Payment Required',
         message: 'Scheduled export requires a Pro license.',
-        upsell: 'https://formflow.dev/pricing',
+        upsell: 'https://hrahimi270.github.io/formflow-website/#pricing',
       };
       return;
     }
@@ -643,7 +643,7 @@ const submissionController = ({ strapi }: { strapi: Core.Strapi }) => ({
       ctx.body = {
         error: 'Payment Required',
         message: 'Scheduled export requires a Pro license.',
-        upsell: 'https://formflow.dev/pricing',
+        upsell: 'https://hrahimi270.github.io/formflow-website/#pricing',
       };
       return;
     }

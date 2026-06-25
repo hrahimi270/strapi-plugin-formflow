@@ -279,7 +279,7 @@ const formController = ({ strapi }: { strapi: Core.Strapi }) => ({
           status: 402,
           name: 'PaymentRequired',
           message: `Upgrade to Pro to use feature: ${entitlementBlock.feature}`,
-          details: { feature: entitlementBlock.feature, upgradeUrl: 'https://formflow.dev/pricing' },
+          details: { feature: entitlementBlock.feature, upgradeUrl: 'https://hrahimi270.github.io/formflow-website/#pricing' },
         },
       };
     }
@@ -333,7 +333,7 @@ const formController = ({ strapi }: { strapi: Core.Strapi }) => ({
             message: `Upgrade to Pro to use feature: ${entitlementBlock.feature}`,
             details: {
               feature: entitlementBlock.feature,
-              upgradeUrl: 'https://formflow.dev/pricing',
+              upgradeUrl: 'https://hrahimi270.github.io/formflow-website/#pricing',
             },
           },
         };

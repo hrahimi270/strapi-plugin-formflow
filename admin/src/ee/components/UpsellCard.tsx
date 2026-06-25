@@ -5,7 +5,7 @@ import { type FeatureKey } from '../feature-map';
 import { ProBadge } from './ProBadge';
 
 /** Single upsell destination — imported by every Phase 1+ gating point. */
-export const PURCHASE_URL = 'https://formflow.dev/pricing';
+export const PURCHASE_URL = 'https://hrahimi270.github.io/formflow-website/#pricing';
 
 export interface UpsellCardProps {
   /** Feature key whose tier label is shown (e.g. "Pro feature"). */
