@@ -182,8 +182,8 @@ All public endpoints are mounted under `/api/formflow` and are unauthenticated b
 
 ## Links
 
-- **Website:** https://hrahimi270.github.io/formflow-website
-- **Pricing & plans:** https://hrahimi270.github.io/formflow-website/#pricing
+- **Website:** https://hrahimi270.github.io/formflow
+- **Pricing & plans:** https://hrahimi270.github.io/formflow/#pricing
 - **Repository & issues:** https://github.com/hrahimi270/strapi-plugin-formflow
 - **Frontend SDKs:** https://github.com/hrahimi270/formflow-sdk (`@formflowjs/react`, `@formflowjs/vue`)
 
