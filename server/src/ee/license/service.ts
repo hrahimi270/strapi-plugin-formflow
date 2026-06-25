@@ -15,21 +15,25 @@ const INSTANCE_NAME_KEY = 'license-instance-name';
 // sha256 of the configured key — lets us detect a key change (Pro→Business or a
 // regenerated key) across boots WITHOUT ever persisting the raw key.
 const KEY_HASH_KEY = 'license-key-hash';
-const DEFAULT_GRACE_DAYS = 14;
+// Connectivity-failure grace window, in days. Intentionally a FIXED constant and
+// NOT customer-configurable: the plugin runs in the customer's own environment, so
+// any env var (e.g. a `FORMFLOW_LICENSE_GRACE_DAYS`) would let a customer set an
+// arbitrarily large window and then block the Lemon Squeezy API to run Pro/Business
+// indefinitely without a valid key. Changing this value requires editing this
+// EE file, which is a license violation and forces a rebuild.
+const GRACE_DAYS = 14;
 const DAY_MS = 86_400_000;
 
 /** Plugin license configuration block read from `strapi.config`. */
 interface LicenseConfig {
   license?: {
     key?: string;
-    graceDays?: number;
-    provider?: string;
   };
 }
 
 /**
  * Persisted validation cache. `graceUntil` is computed at the moment of a
- * *successful* validation (lastValidatedAt + graceDays) so that a process
+ * *successful* validation (lastValidatedAt + GRACE_DAYS) so that a process
  * restart during an outage does not reset the connectivity grace window.
  */
 export interface LicenseCache {
@@ -83,15 +87,6 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
   /** sha256 hex of the configured key — persisted instead of the raw key. */
   function hashKey(licenseKey: string): string {
     return createHash('sha256').update(licenseKey).digest('hex');
-  }
-
-  /**
-   * Resolve the configured MoR provider (env-driven via config), defaulting to
-   * Lemon Squeezy for unset/unknown values. Threaded into every MoR call so the
-   * adapter targets the right provider's endpoint + credential.
-   */
-  function readProvider(): morClient.MorProvider {
-    return morClient.resolveProvider(readConfig().license?.provider);
   }
 
   function store() {
@@ -148,7 +143,6 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
       const result = await morClient.activate({
         licenseKey,
         instanceName: await resolveInstanceName(),
-        provider: readProvider(),
       });
       if (result) {
         _instanceId = result.instanceId;
@@ -179,7 +173,6 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
       const result = await morClient.validate({
         licenseKey,
         instanceId: _instanceId ?? undefined,
-        provider: readProvider(),
       });
 
       // Connectivity / parse failure: fall back to the cached entitlement for the
@@ -234,13 +227,12 @@ export function createLicenseService(strapi: Core.Strapi): LicenseService {
       // Successful validation: refresh the cache, compute a fresh grace window, and
       // mark the license active.
       const now = new Date();
-      const graceDays = readConfig().license?.graceDays ?? DEFAULT_GRACE_DAYS;
       _cache = {
         tier: result.tier,
         status: result.status,
         validUntil: result.validUntil,
         lastValidatedAt: now,
-        graceUntil: new Date(now.getTime() + graceDays * DAY_MS),
+        graceUntil: new Date(now.getTime() + GRACE_DAYS * DAY_MS),
       };
       await persistCache(_cache);
       // Persist the key hash on a successful validation too: the key may have been
