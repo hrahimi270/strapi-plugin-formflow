@@ -26,10 +26,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE-EE"
   ],
   "scripts": {
-    "build": "strapi-plugin build && node scripts/check-ee-bundled.mjs",
+    "build": "strapi-plugin build && node scripts/stamp-ee-spdx.mjs && node scripts/check-ee-bundled.mjs",
+    "stamp:ee": "node scripts/stamp-ee-spdx.mjs",
     "check:ee": "node scripts/check-ee-bundled.mjs",
     "watch": "strapi-plugin watch",
     "watch:link": "strapi-plugin watch:link",
