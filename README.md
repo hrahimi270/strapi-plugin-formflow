@@ -8,7 +8,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@formflowjs/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/@formflowjs/strapi-plugin-formflow)
 [![npm downloads](https://img.shields.io/npm/dm/@formflowjs/strapi-plugin-formflow.svg)](https://www.npmjs.com/package/@formflowjs/strapi-plugin-formflow)
-[![license](https://img.shields.io/npm/l/@formflowjs/strapi-plugin-formflow.svg)](./LICENSE)
+[![License: Open Core](https://img.shields.io/badge/license-Open%20Core%20(MIT%20%2B%20EE)-4945FF.svg)](./LICENSE)
 [![Strapi v5](https://img.shields.io/badge/Strapi-v5-4945FF.svg)](https://strapi.io)
 
 FormFlow lets you build configurable forms visually in the Strapi admin panel and consume them over a clean REST API from **any** frontend. Forms, fields, validation, spam protection, notifications, and submissions all live in Strapi — your frontend just fetches the schema and posts the values. Truly headless: bring your own framework, your own styling, your own UX.
