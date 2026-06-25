@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.jpg" alt="FormFlow" width="120" height="120" />
+</p>
+
 # FormFlow
 
 **The dynamic, headless form builder for Strapi v5.**
