@@ -1,5 +1,11 @@
 # @formflowjs/strapi-plugin-formflow
 
+## 1.0.3
+
+### Patch Changes
+
+- 408e073: Set the real copyright holder and licensing contact (Bardiya Rahimi <hrahimi270@gmail.com>) in LICENSE, LICENSE-EE, and the package.json author field.
+
 ## 1.0.2
 
 ### Patch Changes
