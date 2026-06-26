@@ -187,6 +187,25 @@ All public endpoints are mounted under `/api/formflow` and are unauthenticated b
 - **Repository & issues:** https://github.com/hrahimi270/strapi-plugin-formflow
 - **Frontend SDKs:** https://github.com/hrahimi270/formflow-sdk (`@formflowjs/react`, `@formflowjs/vue`)
 
+## Telemetry
+
+FormFlow sends **anonymous, opt-out** usage telemetry so we can see how many installs are active and prioritize what to build. We never collect personal data, form content, submissions, or environment secrets.
+
+Each install sends a one-time install event plus a daily heartbeat containing only:
+
+- An anonymous install id (a SHA-256 hash of your Strapi project UUID — not reversible to your project)
+- Plugin version, Strapi version, and Node.js version
+- License tier (`free` / `pro` / `business`) and total number of forms
+- Approximate country (derived at the edge, never your IP)
+
+**Opt out** at any time by setting:
+
+```bash
+FORMFLOW_TELEMETRY_DISABLED=true
+```
+
+Telemetry is also disabled automatically if you've disabled Strapi's own telemetry (via `STRAPI_TELEMETRY_DISABLED`, `npx strapi telemetry:disable`, or removing the project `uuid`).
+
 ## License
 
 FormFlow is **open-core**:
