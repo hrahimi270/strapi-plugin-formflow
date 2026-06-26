@@ -1,6 +1,6 @@
 import type { Core } from '@strapi/strapi';
 
-import { RETENTION_CRON_NAME, LICENSE_CRON_NAME } from './bootstrap';
+import { RETENTION_CRON_NAME, LICENSE_CRON_NAME, TELEMETRY_CRON_NAME } from './bootstrap';
 import { stopRateLimitCleanup } from './policies/rate-limit';
 
 const destroy = async ({ strapi }: { strapi: Core.Strapi }) => {
@@ -29,6 +29,18 @@ const destroy = async ({ strapi }: { strapi: Core.Strapi }) => {
   } catch (error) {
     strapi.log.error(
       '[FormFlow] Failed to remove the license refresh cron:',
+      error
+    );
+  }
+
+  // Remove the telemetry heartbeat cron.
+  try {
+    if (strapi.cron && typeof strapi.cron.remove === 'function') {
+      strapi.cron.remove(TELEMETRY_CRON_NAME);
+    }
+  } catch (error) {
+    strapi.log.error(
+      '[FormFlow] Failed to remove the telemetry heartbeat cron:',
       error
     );
   }

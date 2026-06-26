@@ -6,6 +6,7 @@ import email from './email';
 import webhook from './webhook';
 import license from './license';
 import analytics from './analytics';
+import telemetry from './telemetry';
 
 export default {
   form,
@@ -16,4 +17,5 @@ export default {
   webhook,
   license,
   analytics,
+  telemetry,
 };

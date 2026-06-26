@@ -19,6 +19,12 @@ export const RETENTION_CRON_NAME = 'formflowDataRetention';
  */
 export const LICENSE_CRON_NAME = 'formflowLicenseRefresh';
 
+/**
+ * Named cron task that sends the daily anonymous telemetry heartbeat. The name
+ * is reused in destroy.ts to remove the job on plugin teardown.
+ */
+export const TELEMETRY_CRON_NAME = 'formflowTelemetryHeartbeat';
+
 const bootstrap = async ({ strapi }: { strapi: Core.Strapi }) => {
   // Start the rate-limit store cleanup timer. Its lifecycle is tied to the
   // Strapi instance and is cleared in the destroy hook.
@@ -32,6 +38,18 @@ const bootstrap = async ({ strapi }: { strapi: Core.Strapi }) => {
   } catch (error) {
     strapi.log.error('[FormFlow] License init failed:', error);
   }
+
+  // Telemetry: anonymous, opt-out usage ping (install event + throttled
+  // heartbeat). Deliberately NOT awaited so a slow/unreachable endpoint can
+  // never delay boot — init() handles its own errors and respects every
+  // opt-out signal (see services/telemetry.ts).
+  strapi
+    .plugin('formflow')
+    .service('telemetry')
+    .init()
+    .catch((error: unknown) => {
+      strapi.log.debug('[FormFlow] Telemetry init failed (non-fatal):', error);
+    });
 
   // Data retention: when `dataRetentionDays` > 0, register a daily cron job that
   // deletes submissions older than the configured window. When it is 0/unset
@@ -100,6 +118,35 @@ const bootstrap = async ({ strapi }: { strapi: Core.Strapi }) => {
   } catch (error) {
     strapi.log.error(
       '[FormFlow] Failed to register the license refresh cron:',
+      error
+    );
+  }
+
+  // Telemetry: daily anonymous heartbeat so long-running instances keep
+  // registering as active installs. Mirrors the license/retention cron pattern;
+  // 02:00 is offset from the other jobs (00:00 retention, 01:00 license). The
+  // heartbeat service no-ops on any opt-out and never throws.
+  try {
+    if (strapi.cron && typeof strapi.cron.add === 'function') {
+      strapi.cron.add({
+        [TELEMETRY_CRON_NAME]: {
+          options: '0 2 * * *',
+          async task() {
+            try {
+              await strapi.plugin('formflow').service('telemetry').heartbeat();
+            } catch (error) {
+              strapi.log.debug(
+                '[FormFlow] Telemetry heartbeat cron failed (non-fatal):',
+                error
+              );
+            }
+          },
+        },
+      });
+    }
+  } catch (error) {
+    strapi.log.debug(
+      '[FormFlow] Failed to register the telemetry heartbeat cron:',
       error
     );
   }
