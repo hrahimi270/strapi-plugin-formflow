@@ -26,8 +26,16 @@ import { version as PLUGIN_VERSION } from '../../../package.json';
 /** FormFlow-owned ingestion Worker. Hardcoded by design (see module docs). */
 const TELEMETRY_ENDPOINT = 'https://formflow-telemetry.lo-agency.workers.dev';
 
-/** Abort the ping if the endpoint doesn't respond quickly. */
+/** Abort a single ping attempt if the endpoint doesn't respond quickly. */
 const REQUEST_TIMEOUT_MS = 3000;
+
+/**
+ * Retry transient send failures. The very first outbound request from a fresh
+ * Node process (cold DNS/TLS/worker) can fail where the next succeeds, so a
+ * couple of retries materially improve delivery of the one-shot install event.
+ */
+const MAX_SEND_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1000;
 
 /**
  * Minimum gap between boot-triggered heartbeats. Prevents dev restarts from
@@ -71,6 +79,8 @@ export interface TelemetryService {
  */
 const isTruthy = (value: unknown): boolean =>
   value === true || value === 1 || ['true', '1'].includes(String(value).toLowerCase());
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const telemetryService = ({ strapi }: { strapi: Core.Strapi }): TelemetryService => {
   const store = () => strapi.store({ type: 'plugin', name: 'formflow' });
@@ -122,31 +132,52 @@ const telemetryService = ({ strapi }: { strapi: Core.Strapi }): TelemetryService
     };
   };
 
-  /** POST a single event. Fire-and-forget safe: times out and never throws. */
-  const send = async (event: TelemetryEvent, properties: TelemetryProperties): Promise<void> => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      await fetch(TELEMETRY_ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ event, distinct_id: distinctId(), properties }),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      strapi.log.debug(`[FormFlow] Telemetry ping failed (non-fatal): ${error}`);
-    } finally {
-      clearTimeout(timer);
+  /**
+   * POST a single event. Returns true only when the endpoint confirms receipt
+   * (2xx). Never throws. Retries network errors a few times (handles the cold
+   * first-request failure); does not retry an explicit non-2xx rejection.
+   */
+  const send = async (event: TelemetryEvent, properties: TelemetryProperties): Promise<boolean> => {
+    const body = JSON.stringify({ event, distinct_id: distinctId(), properties });
+
+    for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(TELEMETRY_ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+          signal: controller.signal,
+        });
+        // Explicit rejection (e.g. malformed payload): retrying won't help.
+        if (!res.ok) {
+          strapi.log.debug(`[FormFlow] Telemetry ${event} rejected: ${res.status}`);
+          return false;
+        }
+        return true;
+      } catch (error) {
+        strapi.log.debug(
+          `[FormFlow] Telemetry ${event} attempt ${attempt}/${MAX_SEND_ATTEMPTS} failed (non-fatal): ${error}`
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+      if (attempt < MAX_SEND_ATTEMPTS) await delay(RETRY_DELAY_MS);
     }
+    return false;
   };
 
   const heartbeat = async (): Promise<void> => {
     if (!isEnabled()) return;
-    await send('plugin_heartbeat', await buildProperties());
-    try {
-      await store().set({ key: STORE_LAST_HEARTBEAT_KEY, value: Date.now() });
-    } catch {
-      // Throttle bookkeeping is best-effort.
+    // Only record the timestamp on confirmed delivery, so a failed heartbeat is
+    // retried on the next boot instead of being throttled away.
+    if (await send('plugin_heartbeat', await buildProperties())) {
+      try {
+        await store().set({ key: STORE_LAST_HEARTBEAT_KEY, value: Date.now() });
+      } catch {
+        // Throttle bookkeeping is best-effort.
+      }
     }
   };
 
@@ -158,11 +189,12 @@ const telemetryService = ({ strapi }: { strapi: Core.Strapi }): TelemetryService
 
     const s = store();
 
-    // One-time install event, deduplicated via a persisted flag.
+    // One-time install event. The "sent" flag is persisted ONLY after confirmed
+    // delivery, so a failed first attempt is retried on a later boot rather than
+    // being lost forever.
     try {
       const alreadySent = await s.get({ key: STORE_INSTALLED_KEY });
-      if (!alreadySent) {
-        await send('plugin_installed', await buildProperties());
+      if (!alreadySent && (await send('plugin_installed', await buildProperties()))) {
         await s.set({ key: STORE_INSTALLED_KEY, value: true });
       }
     } catch (error) {

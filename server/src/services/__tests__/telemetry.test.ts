@@ -151,6 +151,50 @@ function makeStrapi(configOverrides: Record<string, unknown> = {}) {
     assert.strictEqual(calls.length, 0, 'no resend when already installed and recently beat');
   }
 
+  // 9. A rejected send must NOT persist state, so a later boot retries it. (This
+  //    is the bug that silently lost the install event: marking it "sent" before
+  //    the endpoint confirmed receipt.)
+  {
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: false,
+      status: 500,
+      async text() {
+        return '';
+      },
+    });
+    const { strapi, store } = makeStrapi();
+    await telemetryService({ strapi }).init();
+    assert.strictEqual(
+      store.get('telemetry-installed-sent') ?? null,
+      null,
+      'install must not be marked sent when the endpoint rejects it'
+    );
+    assert.strictEqual(
+      store.get('telemetry-last-heartbeat') ?? null,
+      null,
+      'heartbeat timestamp must not be recorded when the endpoint rejects it'
+    );
+  }
+
+  // 10. A transient failure on the first attempt recovers on retry — the cold
+  //     first-request fix. Install is delivered and marked sent.
+  {
+    let attempts = 0;
+    (globalThis as { fetch: unknown }).fetch = async (_url: string, init?: { body?: string }) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('ECONNRESET (simulated cold first request)');
+      return { ok: true, status: 202, async text() { return ''; }, _body: init?.body };
+    };
+    const { strapi, store } = makeStrapi();
+    await telemetryService({ strapi }).init();
+    assert.strictEqual(
+      store.get('telemetry-installed-sent'),
+      true,
+      'install is marked sent after the retry succeeds'
+    );
+    assert.ok(attempts >= 2, 'the first failed attempt was retried');
+  }
+
   if (origFormflow !== undefined) process.env.FORMFLOW_TELEMETRY_DISABLED = origFormflow;
   if (origStrapi !== undefined) process.env.STRAPI_TELEMETRY_DISABLED = origStrapi;
 
